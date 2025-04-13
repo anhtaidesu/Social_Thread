@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { AuthState, User } from '../../types';
 import axiosInstance from '../../utils/axiosConfig';
+import socketService from '../../services/socket.service';
 
 // API URL is now handled by axiosInstance in the config file
 
@@ -163,6 +164,9 @@ export const register = createAsyncThunk<
 
 // Logout thunk
 export const logout = createAsyncThunk('auth/logout', async () => {
+  // Disconnect socket
+  socketService.disconnect();
+  
   // Also try to call the logout endpoint if available
   try {
     await axiosInstance.post('/api/v1/logout');
@@ -174,6 +178,38 @@ export const logout = createAsyncThunk('auth/logout', async () => {
   localStorage.removeItem('token');
   localStorage.removeItem('refreshToken');
   return null;
+});
+
+// Reset password thunk
+export const resetPassword = createAsyncThunk<
+  { message: string },
+  { email: string; otp: string; password: string },
+  { rejectValue: string }
+>('auth/resetPassword', async (data, { rejectWithValue }) => {
+  try {
+    console.log('Resetting password for:', data.email);
+    const response = await axiosInstance.post('/api/v1/resetPassword', data);
+    console.log('Reset password response:', response);
+    
+    if (response.data.EC !== 0) {
+      console.error('Password reset failed with EC:', response.data.EC, 'EM:', response.data.EM);
+      return rejectWithValue(response.data.EM || 'Password reset failed');
+    }
+    
+    return { message: response.data.EM || 'Password reset successful' };
+  } catch (error: any) {
+    console.error('Error resetting password:', error);
+    
+    if (error.response) {
+      console.error('Error response data:', error.response.data);
+      return rejectWithValue(error.response.data?.EM || `Server error: ${error.response.status}`);
+    } else if (error.request) {
+      console.error('Error request:', error.request);
+      return rejectWithValue('No response from server');
+    }
+    
+    return rejectWithValue('Unknown error occurred');
+  }
 });
 
 // Auth slice
@@ -233,6 +269,9 @@ const authSlice = createSlice({
         state.refreshToken = action.payload.refreshToken;
         state.otpSent = false;
         state.otpEmail = null;
+        
+        // Connect to websocket when user is authenticated
+        socketService.connect();
       })
       .addCase(login.rejected, (state, action) => {
         state.isLoading = false;
@@ -268,6 +307,23 @@ const authSlice = createSlice({
         state.isAuthenticated = false;
         state.otpSent = false;
         state.otpEmail = null;
+      });
+
+    // Reset password cases
+    builder
+      .addCase(resetPassword.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(resetPassword.fulfilled, (state) => {
+        state.isLoading = false;
+        state.error = null;
+        state.otpSent = false;
+        state.otpEmail = null;
+      })
+      .addCase(resetPassword.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload || 'Failed to reset password';
       });
   },
 });

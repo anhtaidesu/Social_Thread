@@ -65,22 +65,31 @@ export interface Comment {
   author: User;
   post: string; // Post ID
   likes: number;
+  likeCount?: number;
   isLiked?: boolean;
   parentId?: string;
   repliesCount?: number;
+  replies?: Comment[];
   createdAt: string;
   updatedAt: string;
 }
 
 export interface Notification {
   id: string;
-  type: 'like' | 'comment' | 'follow' | 'repost' | 'mention';
+  type: 'LIKE' | 'COMMENT' | 'FOLLOW' | 'REPOST' | 'MENTION' | 'FOLLOW_REQUEST' | 'FOLLOW_APPROVED' | 'SYSTEM';
+  entityType: 'POST' | 'COMMENT' | 'PROFILE' | 'SYSTEM';
+  entityId?: string;
   sender: User;
-  receiver: string; // User ID
+  message: string;
+  isRead: boolean;
+  metadata?: any;
+  createdAt: string;
+  
+  // Các trường cũ giữ lại để tương thích ngược
+  receiver?: string; // User ID
   post?: string; // Post ID
   comment?: string; // Comment ID
-  read: boolean;
-  createdAt: string;
+  read?: boolean;
 }
 
 export interface AuthState {

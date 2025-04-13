@@ -1,9 +1,6 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import axios from 'axios';
 import { Notification, ErrorResponse } from '../../types';
-
-// API URL from env
-const API_URL = process.env.REACT_APP_SOCIAL_API_URL || 'http://localhost:8081';
+import NotificationService from '../../services/notification.service';
 
 interface NotificationsState {
   notifications: Notification[];
@@ -19,43 +16,30 @@ const initialState: NotificationsState = {
   error: null,
 };
 
-// Helper function to set auth headers
-const setAuthHeader = (token: string) => {
-  return {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  };
-};
-
 // Fetch notifications
 export const fetchNotifications = createAsyncThunk<
   Notification[],
   { page?: number; limit?: number },
   { rejectValue: ErrorResponse }
->('notifications/fetchNotifications', async (params, { rejectWithValue, getState }) => {
+>('notifications/fetchNotifications', async (params, { rejectWithValue }) => {
   try {
-    const state = getState() as { auth: { token: string } };
-    const token = state.auth.token;
+    const { page = 1, limit = 20 } = params;
+    const result = await NotificationService.getNotifications(page, limit);
     
-    if (!token) {
+    if (!result.success) {
+      console.error('Failed to fetch notifications:', result.error);
       return rejectWithValue({
-        message: 'No authentication token',
-        status: 401,
+        message: result.error || 'Failed to fetch notifications',
+        status: 500,
       });
     }
     
-    const { page = 1, limit = 20 } = params;
-    const response = await axios.get(
-      `${API_URL}/api/v1/notifications?page=${page}&limit=${limit}`,
-      setAuthHeader(token)
-    );
-    
-    return response.data.notifications;
+    return result.data.notifications;
   } catch (error: any) {
+    console.error('Error in fetchNotifications thunk:', error);
     return rejectWithValue({
-      message: error.response?.data?.message || 'Failed to fetch notifications',
-      status: error.response?.status || 500,
+      message: error.message || 'Failed to fetch notifications',
+      status: 500,
     });
   }
 });
@@ -65,29 +49,24 @@ export const markAsRead = createAsyncThunk<
   string,
   string,
   { rejectValue: ErrorResponse }
->('notifications/markAsRead', async (notificationId, { rejectWithValue, getState }) => {
+>('notifications/markAsRead', async (notificationId, { rejectWithValue }) => {
   try {
-    const state = getState() as { auth: { token: string } };
-    const token = state.auth.token;
+    const result = await NotificationService.markAsRead(notificationId);
     
-    if (!token) {
+    if (!result.success) {
+      console.error('Failed to mark notification as read:', result.error);
       return rejectWithValue({
-        message: 'No authentication token',
-        status: 401,
+        message: result.error || 'Failed to mark notification as read',
+        status: 500,
       });
     }
     
-    await axios.patch(
-      `${API_URL}/api/v1/notifications/${notificationId}/read`,
-      {},
-      setAuthHeader(token)
-    );
-    
     return notificationId;
   } catch (error: any) {
+    console.error('Error in markAsRead thunk:', error);
     return rejectWithValue({
-      message: error.response?.data?.message || 'Failed to mark notification as read',
-      status: error.response?.status || 500,
+      message: error.message || 'Failed to mark notification as read',
+      status: 500,
     });
   }
 });
@@ -97,27 +76,49 @@ export const markAllAsRead = createAsyncThunk<
   void,
   void,
   { rejectValue: ErrorResponse }
->('notifications/markAllAsRead', async (_, { rejectWithValue, getState }) => {
+>('notifications/markAllAsRead', async (_, { rejectWithValue }) => {
   try {
-    const state = getState() as { auth: { token: string } };
-    const token = state.auth.token;
+    const result = await NotificationService.markAllAsRead();
     
-    if (!token) {
+    if (!result.success) {
+      console.error('Failed to mark all notifications as read:', result.error);
       return rejectWithValue({
-        message: 'No authentication token',
-        status: 401,
+        message: result.error || 'Failed to mark all notifications as read',
+        status: 500,
+      });
+    }
+  } catch (error: any) {
+    console.error('Error in markAllAsRead thunk:', error);
+    return rejectWithValue({
+      message: error.message || 'Failed to mark all notifications as read',
+      status: 500,
+    });
+  }
+});
+
+// Delete notification
+export const deleteNotification = createAsyncThunk<
+  string,
+  string,
+  { rejectValue: ErrorResponse }
+>('notifications/deleteNotification', async (notificationId, { rejectWithValue }) => {
+  try {
+    const result = await NotificationService.deleteNotification(notificationId);
+    
+    if (!result.success) {
+      console.error('Failed to delete notification:', result.error);
+      return rejectWithValue({
+        message: result.error || 'Failed to delete notification',
+        status: 500,
       });
     }
     
-    await axios.patch(
-      `${API_URL}/api/v1/notifications/mark-all-read`,
-      {},
-      setAuthHeader(token)
-    );
+    return notificationId;
   } catch (error: any) {
+    console.error('Error in deleteNotification thunk:', error);
     return rejectWithValue({
-      message: error.response?.data?.message || 'Failed to mark all notifications as read',
-      status: error.response?.status || 500,
+      message: error.message || 'Failed to delete notification',
+      status: 500,
     });
   }
 });
@@ -129,7 +130,7 @@ const notificationsSlice = createSlice({
   reducers: {
     addNotification: (state, action: PayloadAction<Notification>) => {
       state.notifications = [action.payload, ...state.notifications];
-      if (!action.payload.read) {
+      if (action.payload.isRead === false) {
         state.unreadCount += 1;
       }
     },
@@ -149,7 +150,7 @@ const notificationsSlice = createSlice({
         state.isLoading = false;
         state.notifications = action.payload || [];
         state.unreadCount = Array.isArray(action.payload) 
-          ? action.payload.filter(notification => !notification.read).length 
+          ? action.payload.filter(notification => notification.isRead === false).length 
           : 0;
       })
       .addCase(fetchNotifications.rejected, (state, action) => {
@@ -162,8 +163,8 @@ const notificationsSlice = createSlice({
       .addCase(markAsRead.fulfilled, (state, action) => {
         const index = state.notifications.findIndex(n => n.id === action.payload);
         if (index !== -1) {
-          const wasUnread = !state.notifications[index].read;
-          state.notifications[index].read = true;
+          const wasUnread = state.notifications[index].isRead === false;
+          state.notifications[index].isRead = true;
           if (wasUnread) {
             state.unreadCount = Math.max(0, state.unreadCount - 1);
           }
@@ -175,9 +176,26 @@ const notificationsSlice = createSlice({
       .addCase(markAllAsRead.fulfilled, (state) => {
         state.notifications = state.notifications.map(notification => ({
           ...notification,
-          read: true
+          isRead: true
         }));
         state.unreadCount = 0;
+      });
+
+    // Delete notification cases
+    builder
+      .addCase(deleteNotification.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(deleteNotification.fulfilled, (state, action) => {
+        state.isLoading = false;
+        state.notifications = state.notifications.filter(n => n.id !== action.payload);
+        // Recalculate unread count after deletion
+        state.unreadCount = state.notifications.filter(n => n.isRead === false).length;
+      })
+      .addCase(deleteNotification.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload?.message || 'Failed to delete notification';
       });
   },
 });

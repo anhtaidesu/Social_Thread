@@ -15,7 +15,9 @@ import {
   Snackbar,
   IconButton,
   InputAdornment,
-  useTheme
+  useTheme,
+  styled,
+  Fade
 } from '@mui/material';
 import { 
   Google as GoogleIcon,
@@ -26,6 +28,22 @@ import {
 import { login } from '../features/auth/authSlice';
 import type { AppDispatch, RootState } from '../app/store';
 import { AuthState } from '../types';
+
+// Styled Google sign-in button
+const GoogleButton = styled(Button)(({ theme }) => ({
+  padding: '12px 0',
+  backgroundColor: '#ffffff',
+  color: '#757575',
+  fontWeight: 600,
+  fontSize: '16px',
+  border: '1px solid #dadce0',
+  '&:hover': {
+    backgroundColor: '#f6f6f6',
+    border: '1px solid #dadce0',
+  },
+  boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+  borderRadius: '8px',
+}));
 
 const Login: React.FC = () => {
   const theme = useTheme();
@@ -46,6 +64,7 @@ const Login: React.FC = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [debugInfo, setDebugInfo] = useState<any>(null);
+  const [googleLoading, setGoogleLoading] = useState(false);
   
   useEffect(() => {
     console.log('Auth state:', auth);
@@ -137,7 +156,34 @@ const Login: React.FC = () => {
   };
   
   const handleGoogleLogin = () => {
-    window.open(`${process.env.REACT_APP_AUTH_API_URL}/api/auth/google`, '_self');
+    setGoogleLoading(true);
+    
+    try {
+      // Open the Google auth window
+      window.open(`${process.env.REACT_APP_AUTH_API_URL}/api/auth/google`, '_self');
+      
+      // Set up message listener for OAuth callback
+      window.addEventListener('message', (event) => {
+        if (event.origin !== window.location.origin) return;
+        
+        if (event.data.type === 'google-auth-success') {
+          console.log('Google authentication successful', event.data);
+          setSnackbarMessage('Đăng nhập Google thành công!');
+          setSnackbarOpen(true);
+          // Redux will handle the authentication state
+        } else if (event.data.type === 'google-auth-error') {
+          console.error('Google authentication failed', event.data);
+          setSnackbarMessage('Đăng nhập Google thất bại: ' + event.data.error);
+          setSnackbarOpen(true);
+          setGoogleLoading(false);
+        }
+      });
+    } catch (error) {
+      console.error('Error during Google login:', error);
+      setSnackbarMessage('Lỗi kết nối với Google');
+      setSnackbarOpen(true);
+      setGoogleLoading(false);
+    }
   };
   
   const handleFacebookLogin = () => {
@@ -162,15 +208,35 @@ const Login: React.FC = () => {
           border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.threadsDark.border : theme.palette.threadsLight.border}`
         }}
       >
-        <Typography component="h1" variant="h5" fontWeight="bold" sx={{ mb: 3 }}>
+        <Typography component="h1" variant="h4" fontWeight="bold" sx={{ mb: 5 }}>
           Đăng nhập
         </Typography>
         
         {error && (
-          <Alert severity="error" sx={{ width: '100%', mb: 2 }}>
+          <Alert severity="error" sx={{ width: '100%', mb: 3 }}>
             {error}
           </Alert>
         )}
+        
+        {/* Prominent Google Sign-In Button */}
+        <GoogleButton
+          fullWidth
+          variant="outlined"
+          startIcon={
+            googleLoading ? null : <GoogleIcon sx={{ color: '#4285F4' }} />
+          }
+          onClick={handleGoogleLogin}
+          disabled={googleLoading}
+          sx={{ mb: 4, position: 'relative', height: '50px' }}
+        >
+          {googleLoading ? (
+            <CircularProgress size={24} sx={{ position: 'absolute', color: '#4285F4' }} />
+          ) : (
+            'Đăng nhập với Google'
+          )}
+        </GoogleButton>
+        
+        <Divider sx={{ width: '100%', mb: 4 }}>HOẶC</Divider>
         
         <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
           <TextField
@@ -220,59 +286,40 @@ const Login: React.FC = () => {
             sx={{ mb: 3 }}
           />
           
+          <Box sx={{ mt: 2, textAlign: 'right' }}>
+            <Link 
+              component={RouterLink} 
+              to="/reset-password" 
+              variant="body2"
+              sx={{ color: theme.palette.primary.main }}
+            >
+              Forgot password?
+            </Link>
+          </Box>
+          
           <Button
             type="submit"
             fullWidth
             variant="contained"
+            sx={{ mt: 3, mb: 2, py: 1.5, borderRadius: 2 }}
             disabled={isLoading}
-            sx={{ 
-              py: 1.5,
-              position: 'relative'
-            }}
           >
-            {isLoading ? (
-              <CircularProgress size={24} sx={{ position: 'absolute' }} />
-            ) : (
-              'Đăng nhập'
-            )}
+            {isLoading ? <CircularProgress size={24} /> : 'Đăng nhập'}
           </Button>
           
           <Box sx={{ mt: 2, textAlign: 'center' }}>
-            <Link component={RouterLink} to="/forgot-password" variant="body2" color="textSecondary">
-              Quên mật khẩu?
-            </Link>
+            <Typography variant="body2">
+              Don't have an account?{' '}
+              <Link 
+                component={RouterLink} 
+                to="/register" 
+                variant="body2"
+                sx={{ color: theme.palette.primary.main, fontWeight: 'bold' }}
+              >
+                Sign up
+              </Link>
+            </Typography>
           </Box>
-          
-          <Divider sx={{ my: 3 }}>HOẶC</Divider>
-          
-          <Button
-            fullWidth
-            variant="outlined"
-            startIcon={<GoogleIcon />}
-            onClick={handleGoogleLogin}
-            sx={{ mb: 2, py: 1.2 }}
-          >
-            Tiếp tục với Google
-          </Button>
-          
-          <Button
-            fullWidth
-            variant="outlined"
-            startIcon={<FacebookIcon />}
-            onClick={handleFacebookLogin}
-            sx={{ py: 1.2 }}
-          >
-            Tiếp tục với Facebook
-          </Button>
-        </Box>
-        
-        <Box sx={{ mt: 3, textAlign: 'center' }}>
-          <Typography variant="body2" color="textSecondary">
-            Chưa có tài khoản?{' '}
-            <Link component={RouterLink} to="/register" fontWeight="bold">
-              Đăng ký
-            </Link>
-          </Typography>
         </Box>
         
         {debugInfo && (
@@ -288,8 +335,17 @@ const Login: React.FC = () => {
         open={snackbarOpen}
         autoHideDuration={6000}
         onClose={handleSnackbarClose}
-        message={snackbarMessage}
-      />
+        TransitionComponent={Fade}
+      >
+        <Alert 
+          onClose={handleSnackbarClose} 
+          severity={error ? "error" : "success"}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };

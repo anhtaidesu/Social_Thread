@@ -40,6 +40,8 @@ const UserCard: React.FC<UserCardProps> = ({
   };
   
   const handleFollowToggle = async () => {
+    if (isCurrentUser) return; // Don't allow self-following
+    
     if (isFollowing) {
       await dispatch(unfollowUser(user.id));
     } else {

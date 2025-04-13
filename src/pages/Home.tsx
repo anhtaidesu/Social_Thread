@@ -4,6 +4,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { AppDispatch, RootState } from '../app/store';
 import { fetchFeed, createRepost } from '../features/posts/postsSlice';
 import PostItem from '../components/PostItem';
+import PostForm from '../components/PostForm';
 import { Post } from '../types';
 import PostService from '../services/post.service';
 
@@ -70,6 +71,11 @@ const Home: React.FC = () => {
     }
   };
 
+  const handlePostCreated = () => {
+    // Refresh the feed after a new post is created
+    dispatch(fetchFeed({ page: 1, limit: 20 }));
+  };
+
   if (!isAuthenticated) {
     return (
       <Card>
@@ -86,7 +92,7 @@ const Home: React.FC = () => {
     );
   }
 
-  if (isLoading) {
+  if (isLoading && feed.length === 0) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
         <CircularProgress />
@@ -94,7 +100,7 @@ const Home: React.FC = () => {
     );
   }
 
-  if (error) {
+  if (error && feed.length === 0) {
     return (
       <Card>
         <CardContent>
@@ -109,14 +115,23 @@ const Home: React.FC = () => {
   return (
     <Box>
       <Typography variant="h5" gutterBottom fontWeight="bold">
-        Home
+        Trang chủ
       </Typography>
+      
+      {/* Post creation form */}
+      <PostForm onPostCreated={handlePostCreated} />
+      
+      {isLoading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+          <CircularProgress size={30} />
+        </Box>
+      )}
       
       {feed.length === 0 ? (
         <Card>
           <CardContent>
             <Typography variant="body1">
-              Your feed is empty. Follow some users to see their posts here.
+              Bảng tin của bạn hiện đang trống. Hãy theo dõi người dùng khác để xem bài đăng của họ.
             </Typography>
           </CardContent>
         </Card>

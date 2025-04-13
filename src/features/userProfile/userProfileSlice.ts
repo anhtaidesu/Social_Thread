@@ -1,23 +1,30 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { User } from '../../types';
-import axiosInstance from '../../utils/axiosConfig';
+import { ProfileService } from '../../services/profile.service';
+import { FollowService } from '../../services/follow.service';
+import profileHelper, { 
+  normalizeUserProfile, 
+  incrementFollowerCount, 
+  decrementFollowerCount 
+} from '../../utils/profileHelper';
 
-// URL của Social Service API
-const SOCIAL_API_URL = process.env.REACT_APP_SOCIAL_API_URL || 'http://localhost:8081';
+interface PaginationState {
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+}
 
 interface UserProfileState {
   profile: User | null;
   followers: User[];
+  followersPagination: PaginationState;
   following: User[];
+  followingPagination: PaginationState;
   suggestedUsers: User[];
   searchResults: {
     profiles: User[];
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      pages: number;
-    };
+    pagination: PaginationState;
   };
   isLoading: boolean;
   error: string | null;
@@ -26,7 +33,19 @@ interface UserProfileState {
 const initialState: UserProfileState = {
   profile: null,
   followers: [],
+  followersPagination: {
+    total: 0,
+    page: 1,
+    limit: 20,
+    pages: 0
+  },
   following: [],
+  followingPagination: {
+    total: 0,
+    page: 1,
+    limit: 20,
+    pages: 0
+  },
   suggestedUsers: [],
   searchResults: {
     profiles: [],
@@ -50,16 +69,91 @@ export const fetchUserProfile = createAsyncThunk<
   try {
     console.log(`Fetching profile for identifier: ${identifier}`);
     
-    const response = await axiosInstance.get(`${SOCIAL_API_URL}/api/v1/profiles/${identifier}`);
+    const result = await ProfileService.getProfile(identifier);
     
-    if (response.data.status === 'success') {
-      return response.data.data.profile;
+    if (result.success && result.data) {
+      return result.data;
     }
     
-    return rejectWithValue(response.data.message || 'Failed to fetch profile');
+    return rejectWithValue(result.error || 'Failed to fetch profile');
   } catch (error: any) {
     console.error('Error fetching profile:', error);
-    return rejectWithValue(error.response?.data?.message || 'Failed to fetch user profile');
+    return rejectWithValue(error.message || 'Failed to fetch user profile');
+  }
+});
+
+// Fetch user profile by userId
+export const fetchUserProfileByUserId = createAsyncThunk<
+  User,
+  string,
+  { rejectValue: string }
+>('userProfile/fetchUserProfileByUserId', async (userId, { rejectWithValue, dispatch }) => {
+  try {
+    console.log(`Fetching profile for userId: ${userId}`);
+    
+    // Thử phương thức 1: Tìm theo userId trực tiếp
+    const result = await ProfileService.getProfileByUserId(userId);
+    
+    if (result.success && result.data) {
+      return result.data;
+    }
+    
+    console.log(`Profile not found by user ID ${userId}, trying alternative methods...`);
+    
+    // Thử phương thức 2: Tìm theo identifier thông thường
+    console.log(`Trying to fetch with general identifier: ${userId}`);
+    const generalResult = await ProfileService.getProfile(userId);
+    
+    if (generalResult.success && generalResult.data) {
+      console.log(`Successfully found profile using general identifier method`);
+      return generalResult.data;
+    }
+    
+    // Nếu ID trông giống username (không phải UUID), thử tìm theo username
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+      console.log(`UserId does not look like UUID, trying username lookup for: ${userId}`);
+      const usernameResult = await ProfileService.getProfileByUsername(userId);
+      
+      if (usernameResult.success && usernameResult.data) {
+        console.log(`Successfully found profile by username: ${userId}`);
+        return usernameResult.data;
+      }
+    }
+    
+    // Tất cả các phương thức đều thất bại
+    console.error('All profile lookup methods failed for:', userId);
+    return rejectWithValue(result.error || 'Failed to fetch profile by userId');
+  } catch (error: any) {
+    console.error('Error fetching profile by userId:', error);
+    return rejectWithValue(error.message || 'Failed to fetch user profile by userId');
+  }
+});
+
+// Fetch user profile by username
+export const fetchUserProfileByUsername = createAsyncThunk<
+  User,
+  string,
+  { rejectValue: string }
+>('userProfile/fetchUserProfileByUsername', async (username, { rejectWithValue }) => {
+  try {
+    console.log(`Fetching profile for username: ${username}`);
+    
+    // Đảm bảo username không có @ ở đầu
+    const cleanUsername = username.startsWith('@') ? username.substring(1) : username;
+    console.log(`Clean username: ${cleanUsername}`);
+    
+    // Sử dụng API endpoint mới, rõ ràng
+    const result = await ProfileService.getProfileByUsername(cleanUsername);
+    
+    if (result.success && result.data) {
+      return result.data;
+    }
+    
+    console.error('Failed to fetch profile by username:', result.error);
+    return rejectWithValue(result.error || 'Failed to fetch profile by username');
+  } catch (error: any) {
+    console.error('Error fetching profile by username:', error);
+    return rejectWithValue(error.message || 'Failed to fetch user profile by username');
   }
 });
 
@@ -70,15 +164,15 @@ export const fetchCurrentUserProfile = createAsyncThunk<
   { rejectValue: string }
 >('userProfile/fetchCurrentUserProfile', async (_, { rejectWithValue }) => {
   try {
-    const response = await axiosInstance.get(`${SOCIAL_API_URL}/api/v1/profiles/me`);
+    const result = await ProfileService.getCurrentProfile();
     
-    if (response.data.status === 'success') {
-      return response.data.data.profile;
+    if (result.success && result.data) {
+      return result.data;
     }
     
-    return rejectWithValue(response.data.message || 'Failed to fetch profile');
+    return rejectWithValue(result.error || 'Failed to fetch profile');
   } catch (error: any) {
-    return rejectWithValue(error.response?.data?.message || 'Failed to fetch user profile');
+    return rejectWithValue(error.message || 'Failed to fetch user profile');
   }
 });
 
@@ -89,15 +183,15 @@ export const updateUserProfile = createAsyncThunk<
   { rejectValue: string }
 >('userProfile/updateUserProfile', async (userData, { rejectWithValue }) => {
   try {
-    const response = await axiosInstance.put(`${SOCIAL_API_URL}/api/v1/profiles`, userData);
+    const result = await ProfileService.updateProfile(userData);
     
-    if (response.data.status === 'success') {
-      return response.data.data.profile;
+    if (result.success) {
+      return result.data;
     }
     
-    return rejectWithValue(response.data.message || 'Failed to update profile');
+    return rejectWithValue(result.error || 'Failed to update profile');
   } catch (error: any) {
-    return rejectWithValue(error.response?.data?.message || 'Failed to update user profile');
+    return rejectWithValue(error.message || 'Failed to update user profile');
   }
 });
 
@@ -108,15 +202,15 @@ export const followUser = createAsyncThunk<
   { rejectValue: string }
 >('userProfile/followUser', async (targetId, { rejectWithValue }) => {
   try {
-    const response = await axiosInstance.post(`${SOCIAL_API_URL}/api/v1/follows/${targetId}`);
+    const result = await FollowService.followUser(targetId);
     
-    if (response.data.status === 'error') {
-      return rejectWithValue(response.data.message || 'Failed to follow user');
+    if (result.success) {
+      return { success: true, followingId: targetId };
     }
     
-    return { success: true, followingId: targetId };
+    return rejectWithValue(result.error || 'Failed to follow user');
   } catch (error: any) {
-    return rejectWithValue(error.response?.data?.message || 'Failed to follow user');
+    return rejectWithValue(error.message || 'Failed to follow user');
   }
 });
 
@@ -127,63 +221,75 @@ export const unfollowUser = createAsyncThunk<
   { rejectValue: string }
 >('userProfile/unfollowUser', async (targetId, { rejectWithValue }) => {
   try {
-    const response = await axiosInstance.delete(`${SOCIAL_API_URL}/api/v1/follows/${targetId}`);
+    const result = await FollowService.unfollowUser(targetId);
     
-    if (response.data.status === 'error') {
-      return rejectWithValue(response.data.message || 'Failed to unfollow user');
+    if (result.success) {
+      return { success: true, followingId: targetId };
     }
     
-    return { success: true, followingId: targetId };
+    return rejectWithValue(result.error || 'Failed to unfollow user');
   } catch (error: any) {
-    return rejectWithValue(error.response?.data?.message || 'Failed to unfollow user');
+    return rejectWithValue(error.message || 'Failed to unfollow user');
   }
 });
 
 // Fetch user followers
 export const fetchUserFollowers = createAsyncThunk<
-  User[],
-  { identifier: string; page?: number; limit?: number },
+  { users: User[], pagination: PaginationState },
+  { identifier: string, page?: number, limit?: number },
   { rejectValue: string }
 >('userProfile/fetchUserFollowers', async (params, { rejectWithValue }) => {
-  const { identifier, page = 1, limit = 10 } = params;
+  const { identifier, page = 1, limit = 20 } = params;
   
   try {
-    const response = await axiosInstance.get(
-      `${SOCIAL_API_URL}/api/v1/follows/followers/${identifier}?page=${page}&limit=${limit}`
-    );
+    const result = await FollowService.getFollowers(identifier, page, limit);
     
-    if (response.data.status === 'error') {
-      return rejectWithValue(response.data.message || 'Failed to fetch followers');
+    if (!result.success || !result.data) {
+      return rejectWithValue(result.error || 'Failed to fetch followers');
     }
     
-    // Đảm bảo chúng ta truy cập đúng dữ liệu từ response
-    return response.data.data.profiles || response.data.data;
+    // Safely access data with null check
+    return {
+      users: result.data.followers || [],
+      pagination: result.data.pagination || {
+        total: 0,
+        page: page,
+        limit: limit,
+        pages: 0
+      }
+    };
   } catch (error: any) {
-    return rejectWithValue(error.response?.data?.message || 'Failed to fetch followers');
+    return rejectWithValue(error.message || 'Failed to fetch followers');
   }
 });
 
 // Fetch user following
 export const fetchUserFollowing = createAsyncThunk<
-  User[],
-  { identifier: string; page?: number; limit?: number },
+  { users: User[], pagination: PaginationState },
+  { identifier: string, page?: number, limit?: number },
   { rejectValue: string }
 >('userProfile/fetchUserFollowing', async (params, { rejectWithValue }) => {
-  const { identifier, page = 1, limit = 10 } = params;
+  const { identifier, page = 1, limit = 20 } = params;
   
   try {
-    const response = await axiosInstance.get(
-      `${SOCIAL_API_URL}/api/v1/follows/following/${identifier}?page=${page}&limit=${limit}`
-    );
+    const result = await FollowService.getFollowing(identifier, page, limit);
     
-    if (response.data.status === 'error') {
-      return rejectWithValue(response.data.message || 'Failed to fetch following');
+    if (!result.success || !result.data) {
+      return rejectWithValue(result.error || 'Failed to fetch following');
     }
     
-    // Đảm bảo chúng ta truy cập đúng dữ liệu từ response
-    return response.data.data.profiles || response.data.data;
+    // Safely access data with null check
+    return {
+      users: result.data.following || [],
+      pagination: result.data.pagination || {
+        total: 0,
+        page: page,
+        limit: limit,
+        pages: 0
+      }
+    };
   } catch (error: any) {
-    return rejectWithValue(error.response?.data?.message || 'Failed to fetch following');
+    return rejectWithValue(error.message || 'Failed to fetch following');
   }
 });
 
@@ -196,44 +302,69 @@ export const fetchSuggestedUsers = createAsyncThunk<
   const { limit = 5 } = params;
   
   try {
-    const response = await axiosInstance.get(`${SOCIAL_API_URL}/api/v1/profiles/suggested?limit=${limit}`);
+    const result = await ProfileService.getSuggestedProfiles(limit);
     
-    if (response.data.status === 'error') {
-      return rejectWithValue(response.data.message || 'Failed to fetch suggested users');
+    if (result.success && result.data) {
+      return result.data;
     }
     
-    // Đảm bảo chúng ta truy cập đúng dữ liệu từ response
-    return response.data.data.profiles || response.data.data;
+    return rejectWithValue(result.error || 'Failed to fetch suggested users');
   } catch (error: any) {
-    return rejectWithValue(error.response?.data?.message || 'Failed to fetch suggested users');
+    return rejectWithValue(error.message || 'Failed to fetch suggested users');
   }
 });
 
 // Search profiles
 export const searchProfiles = createAsyncThunk<
-  { profiles: User[]; pagination: { total: number; page: number; limit: number; pages: number } },
+  { profiles: User[]; pagination: PaginationState },
   { query: string; page?: number; limit?: number },
   { rejectValue: string }
->('userProfile/searchProfiles', async (params, { rejectWithValue }) => {
-  const { query, page = 1, limit = 20 } = params;
-  
-  try {
-    const response = await axiosInstance.get(
-      `${SOCIAL_API_URL}/api/v1/profiles/search?query=${query}&page=${page}&limit=${limit}`
-    );
-    
-    if (response.data.status === 'success') {
+>(
+  'userProfile/searchProfiles',
+  async (
+    {
+      query,
+      page = 1,
+      limit = 10,
+    }: { query: string; page?: number; limit?: number },
+    { rejectWithValue }
+  ) => {
+    try {
+      console.log('Calling searchProfiles with query:', query, 'page:', page, 'limit:', limit);
+      const result = await ProfileService.searchProfiles(query, page, limit);
+      console.log('Search profiles result:', result);
+
+      if (!result.success) {
+        console.error('Error in searchProfiles:', result.error);
+        return rejectWithValue(result.error || 'Failed to search profiles');
+      }
+
+      if (!result.data) {
+        console.error('No data returned from searchProfiles');
+        return rejectWithValue('No data returned from search');
+      }
+
+      console.log('Processing search results:', {
+        profiles: result.data.profiles || [],
+        pagination: result.data.pagination || {}
+      });
+
+      // Ensure we return the correct structure with proper defaulting for all fields
       return {
-        profiles: response.data.data.profiles,
-        pagination: response.data.data.pagination
+        profiles: Array.isArray(result.data.profiles) ? result.data.profiles : [],
+        pagination: {
+          total: typeof result.data.pagination?.total === 'number' ? result.data.pagination.total : 0,
+          page: typeof result.data.pagination?.page === 'number' ? result.data.pagination.page : page,
+          limit: typeof result.data.pagination?.limit === 'number' ? result.data.pagination.limit : limit,
+          pages: typeof result.data.pagination?.pages === 'number' ? result.data.pagination.pages : 0
+        }
       };
+    } catch (error: any) {
+      console.error('Error in searchProfiles:', error);
+      return rejectWithValue(error.message || 'An error occurred while searching profiles');
     }
-    
-    return rejectWithValue(response.data.message || 'Failed to search profiles');
-  } catch (error: any) {
-    return rejectWithValue(error.response?.data?.message || 'Failed to search profiles');
   }
-});
+);
 
 const userProfileSlice = createSlice({
   name: 'userProfile',
@@ -254,11 +385,44 @@ const userProfileSlice = createSlice({
       })
       .addCase(fetchUserProfile.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.profile = action.payload;
+        state.profile = normalizeUserProfile(action.payload);
+        state.error = null;
       })
       .addCase(fetchUserProfile.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload || 'Failed to fetch profile';
+      });
+    
+    // Fetch user profile by userId cases
+    builder
+      .addCase(fetchUserProfileByUserId.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(fetchUserProfileByUserId.fulfilled, (state, action) => {
+        state.isLoading = false;
+        state.profile = normalizeUserProfile(action.payload);
+        state.error = null;
+      })
+      .addCase(fetchUserProfileByUserId.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload || 'Failed to fetch profile by userId';
+      });
+      
+    // Fetch user profile by username cases
+    builder
+      .addCase(fetchUserProfileByUsername.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(fetchUserProfileByUsername.fulfilled, (state, action) => {
+        state.isLoading = false;
+        state.profile = normalizeUserProfile(action.payload);
+        state.error = null;
+      })
+      .addCase(fetchUserProfileByUsername.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload || 'Failed to fetch profile by username';
       });
     
     // Fetch current user profile cases
@@ -269,7 +433,8 @@ const userProfileSlice = createSlice({
       })
       .addCase(fetchCurrentUserProfile.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.profile = action.payload;
+        state.profile = normalizeUserProfile(action.payload);
+        state.error = null;
       })
       .addCase(fetchCurrentUserProfile.rejected, (state, action) => {
         state.isLoading = false;
@@ -284,11 +449,12 @@ const userProfileSlice = createSlice({
       })
       .addCase(updateUserProfile.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.profile = action.payload;
+        state.profile = normalizeUserProfile(action.payload);
+        state.error = null;
       })
       .addCase(updateUserProfile.rejected, (state, action) => {
         state.isLoading = false;
-        state.error = action.payload || 'Failed to update profile';
+        state.error = typeof action.payload === 'string' ? action.payload : 'Failed to update profile';
       });
 
     // Follow user cases
@@ -300,9 +466,7 @@ const userProfileSlice = createSlice({
       .addCase(followUser.fulfilled, (state, action) => {
         state.isLoading = false;
         if (state.profile && state.profile.id === action.payload.followingId) {
-          if (state.profile.followersCount !== undefined) {
-            state.profile.followersCount += 1;
-          }
+          state.profile = incrementFollowerCount(state.profile);
         }
       })
       .addCase(followUser.rejected, (state, action) => {
@@ -319,9 +483,7 @@ const userProfileSlice = createSlice({
       .addCase(unfollowUser.fulfilled, (state, action) => {
         state.isLoading = false;
         if (state.profile && state.profile.id === action.payload.followingId) {
-          if (state.profile.followersCount !== undefined && state.profile.followersCount > 0) {
-            state.profile.followersCount -= 1;
-          }
+          state.profile = decrementFollowerCount(state.profile);
         }
       })
       .addCase(unfollowUser.rejected, (state, action) => {
@@ -337,7 +499,8 @@ const userProfileSlice = createSlice({
       })
       .addCase(fetchUserFollowers.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.followers = action.payload;
+        state.followers = action.payload.users;
+        state.followersPagination = action.payload.pagination;
       })
       .addCase(fetchUserFollowers.rejected, (state, action) => {
         state.isLoading = false;
@@ -352,7 +515,8 @@ const userProfileSlice = createSlice({
       })
       .addCase(fetchUserFollowing.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.following = action.payload;
+        state.following = action.payload.users;
+        state.followingPagination = action.payload.pagination;
       })
       .addCase(fetchUserFollowing.rejected, (state, action) => {
         state.isLoading = false;
@@ -395,47 +559,61 @@ const userProfileSlice = createSlice({
 export const testProfileAPI = {
   getProfile: async (identifier: string) => {
     try {
-      const response = await axiosInstance.get(`${SOCIAL_API_URL}/api/v1/profiles/${identifier}`);
-      console.log('API Response:', response.data);
-      return response.data;
+      const result = await ProfileService.getProfile(identifier);
+      console.log('API Response:', result);
+      return result;
     } catch (error) {
       console.error('API Error:', error);
-      return null;
+      return {
+        success: false,
+        data: null,
+        error: 'Lỗi khi gọi API'
+      };
     }
   },
   
   getCurrentProfile: async () => {
     try {
-      const response = await axiosInstance.get(`${SOCIAL_API_URL}/api/v1/profiles/me`);
-      console.log('API Response:', response.data);
-      return response.data;
+      const result = await ProfileService.getCurrentProfile();
+      console.log('API Response:', result);
+      return result;
     } catch (error) {
       console.error('API Error:', error);
-      return null;
+      return {
+        success: false,
+        data: null, 
+        error: 'Lỗi khi gọi API'
+      };
     }
   },
   
   updateProfile: async (userData: Partial<User>) => {
     try {
-      const response = await axiosInstance.put(`${SOCIAL_API_URL}/api/v1/profiles`, userData);
-      console.log('API Response:', response.data);
-      return response.data;
+      const result = await ProfileService.updateProfile(userData);
+      console.log('API Response:', result);
+      return result;
     } catch (error) {
       console.error('API Error:', error);
-      return null;
+      return {
+        success: false,
+        data: null,
+        error: 'Lỗi khi gọi API'
+      };
     }
   },
   
   searchProfiles: async (query: string, page = 1, limit = 20) => {
     try {
-      const response = await axiosInstance.get(
-        `${SOCIAL_API_URL}/api/v1/profiles/search?query=${query}&page=${page}&limit=${limit}`
-      );
-      console.log('API Response:', response.data);
-      return response.data;
+      const result = await ProfileService.searchProfiles(query, page, limit);
+      console.log('API Response:', result);
+      return result;
     } catch (error) {
       console.error('API Error:', error);
-      return null;
+      return {
+        success: false,
+        data: null,
+        error: 'Lỗi khi gọi API'
+      };
     }
   }
 };

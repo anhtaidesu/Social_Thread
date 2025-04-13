@@ -75,7 +75,10 @@ const CommentSection: React.FC<CommentSectionProps> = ({
   };
 
   const renderComments = () => {
-    if (isLoading && comments.length === 0) {
+    // Ensure comments is always an array
+    const commentArray = Array.isArray(comments) ? comments : [];
+    
+    if (isLoading && commentArray.length === 0) {
       return (
         <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
           <CircularProgress />
@@ -83,7 +86,7 @@ const CommentSection: React.FC<CommentSectionProps> = ({
       );
     }
 
-    if (comments.length === 0) {
+    if (commentArray.length === 0) {
       return (
         <Box sx={{ textAlign: 'center', my: 4 }}>
           <Typography color="text.secondary">
@@ -93,7 +96,7 @@ const CommentSection: React.FC<CommentSectionProps> = ({
       );
     }
 
-    return comments.map(comment => (
+    return commentArray.map(comment => (
       <Box key={comment.id} sx={{ mb: 2 }}>
         <Card 
           sx={{ 
@@ -167,7 +170,7 @@ const CommentSection: React.FC<CommentSectionProps> = ({
   return (
     <Box sx={{ mt: 3 }}>
       <Typography variant="h6" gutterBottom>
-        Comments ({comments.length})
+        Comments ({Array.isArray(comments) ? comments.length : 0})
       </Typography>
       
       <Divider sx={{ mb: 3 }} />

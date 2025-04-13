@@ -19,16 +19,25 @@ import {
   IconButtonProps,
   styled,
   Modal,
-  TextField
+  TextField,
+  Badge,
+  Tooltip,
+  LinearProgress,
+  InputAdornment,
+  Pagination,
+  Alert
 } from '@mui/material';
 import { 
   Settings as SettingsIcon,
   LinkOutlined as LinkIcon,
   Close as CloseIcon,
-  Edit as EditIcon
+  Edit as EditIcon,
+  PhotoCamera as PhotoCameraIcon
 } from '@mui/icons-material';
 import { 
   fetchUserProfile, 
+  fetchUserProfileByUserId,
+  fetchUserProfileByUsername,
   followUser, 
   unfollowUser, 
   updateUserProfile,
@@ -41,6 +50,7 @@ import PostItem from '../components/PostItem';
 import UserList from '../components/UserList';
 import UserAvatar from '../components/UserAvatar';
 import PostService from '../services/post.service';
+import Snackbar from '@mui/material/Snackbar';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -98,6 +108,90 @@ const modalStyle = {
   borderRadius: 2,
 };
 
+interface DebugInfoProps {
+  profile: any;
+  currentUser: any;
+  isOwnProfile: boolean;
+  identifier: string | null;
+  debugMode: boolean;
+  toggleDebugMode: () => void;
+}
+
+const DebugInfo: React.FC<DebugInfoProps> = ({ 
+  profile, 
+  currentUser, 
+  isOwnProfile, 
+  identifier,
+  debugMode,
+  toggleDebugMode 
+}) => {
+  if (!debugMode) return null;
+  
+  return (
+    <Box sx={{ mt: 2, p: 2, border: '1px dashed #ccc', borderRadius: 2, bgcolor: '#f5f5f5' }}>
+      <Typography variant="h6" color="primary">Debug Information</Typography>
+      <Typography variant="body2"><strong>URL Identifier:</strong> {identifier || 'None'}</Typography>
+      <Typography variant="body2"><strong>Is Own Profile:</strong> {isOwnProfile ? 'Yes' : 'No'}</Typography>
+      <Divider sx={{ my: 1 }} />
+      
+      <Typography variant="subtitle2">Current User:</Typography>
+      {currentUser ? (
+        <Box component="pre" sx={{ 
+          maxHeight: 150, 
+          overflow: 'auto', 
+          fontSize: '0.75rem',
+          p: 1,
+          bgcolor: '#e0e0e0',
+          borderRadius: 1
+        }}>
+          {JSON.stringify({
+            id: currentUser.id,
+            username: currentUser.username,
+            displayName: currentUser.displayName
+          }, null, 2)}
+        </Box>
+      ) : (
+        <Typography color="error">Not logged in</Typography>
+      )}
+      
+      <Divider sx={{ my: 1 }} />
+      
+      <Typography variant="subtitle2">Profile Data:</Typography>
+      {profile ? (
+        <Box component="pre" sx={{ 
+          maxHeight: 150, 
+          overflow: 'auto', 
+          fontSize: '0.75rem',
+          p: 1,
+          bgcolor: '#e0e0e0',
+          borderRadius: 1
+        }}>
+          {JSON.stringify({
+            id: profile.id,
+            username: profile.username,
+            displayName: profile.displayName,
+            followersCount: profile.followersCount,
+            followingCount: profile.followingCount,
+            isFollowing: profile.isFollowing
+          }, null, 2)}
+        </Box>
+      ) : (
+        <Typography color="error">Profile not loaded</Typography>
+      )}
+      
+      <Button 
+        variant="outlined" 
+        size="small" 
+        color="primary" 
+        sx={{ mt: 1 }}
+        onClick={toggleDebugMode}
+      >
+        Hide Debug Info
+      </Button>
+    </Box>
+  );
+};
+
 const Profile: React.FC = () => {
   const theme = useTheme();
   const { userId, username } = useParams<{ userId?: string; username?: string }>();
@@ -115,52 +209,176 @@ const Profile: React.FC = () => {
   const [followingOpen, setFollowingOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [profileForm, setProfileForm] = useState({
+    username: '',
+    displayName: '',
     bio: '',
-    fullName: ''
+    profilePicture: ''
+  });
+  const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null);
+  const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [formErrors, setFormErrors] = useState({
+    username: '',
+    displayName: '',
+    bio: ''
   });
   const [likingPosts, setLikingPosts] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'info' | 'warning'>('success');
+  const [followersPage, setFollowersPage] = useState(1);
+  const [followingPage, setFollowingPage] = useState(1);
+  const [postsPage, setPostsPage] = useState(1);
+  const [loadingFollowers, setLoadingFollowers] = useState(false);
+  const [loadingFollowing, setLoadingFollowing] = useState(false);
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [searchUsername, setSearchUsername] = useState('');
+  const [debugMode, setDebugMode] = useState<boolean>(false);
   
-  const isOwnProfile = profile ? (currentUser?.id === profile.id) : false;
+  // Enhanced isOwnProfile check with detailed logging
+  const isOwnProfile = React.useMemo(() => {
+    if (!currentUser || !profile) return false;
+    
+    // Compare userId if it exists in both objects
+    const userIdMatch = currentUser.userId && profile.userId && currentUser.userId === profile.userId;
+    
+    // Or compare profile IDs directly
+    const profileIdMatch = currentUser.id === profile.id;
+    
+    // Also check username as a fallback
+    const usernameMatch = currentUser.username === profile.username;
+    
+    const result = userIdMatch || profileIdMatch || usernameMatch;
+    console.log('isOwnProfile check:', { 
+      userIdMatch, 
+      profileIdMatch, 
+      usernameMatch,
+      currentUserId: currentUser.id,
+      profileId: profile.id,
+      currentUserUsername: currentUser.username,
+      profileUsername: profile.username,
+      result 
+    });
+    
+    return result;
+  }, [currentUser, profile]);
+  
   const isFollowing = profile?.isFollowing || false;
   
   useEffect(() => {
     if (identifier) {
-      console.log(`Fetching profile for identifier: ${identifier}`);
+      console.log(`Fetching profile for identifier: ${identifier}, userId: ${userId}, username: ${username}`);
       
-      // Special case for the problematic user ID
-      if (identifier === '09c41021-c6b5-440d-8893-67e61332f390') {
-        console.log('Detected problematic user ID, applying special handling');
-        // Try fetching by username first
-        dispatch(fetchUserProfile('wibucate'));
-        dispatch(fetchUserPosts({ identifier: 'wibucate', page: 1, limit: 20 }));
-      } else {
+      // Reset error state before new fetch
+      // dispatch(clearProfileError());
+      
+      // Trường hợp 1: Tham số username được cung cấp trong URL (/@username)
+      if (username) {
+        console.log('[Profile] Fetching by username route:', username);
+        const cleanUsername = username.replace(/^@/, ''); // Loại bỏ @ nếu có
+        console.log('[Profile] Clean username:', cleanUsername);
+        
+        // Thử fetchUserProfileByUsername trước
+        dispatch(fetchUserProfileByUsername(cleanUsername))
+          .unwrap()
+          .catch((error) => {
+            console.log('[Profile] Username lookup failed, trying general lookup as fallback:', error);
+            // Nếu thất bại, thử fetchUserProfile thông thường
+            dispatch(fetchUserProfile(cleanUsername));
+          });
+          
+        dispatch(fetchUserPosts({ identifier: cleanUsername, page: 1, limit: 20 }));
+      } 
+      // Trường hợp 2: Tham số userId được cung cấp trong URL (/profile/:userId)
+      else if (userId) {
+        console.log('[Profile] Fetching by userId route:', userId);
+        
+        // Thử fetchUserProfileByUserId trước
+        dispatch(fetchUserProfileByUserId(userId))
+          .unwrap()
+          .catch((error) => {
+            console.log('[Profile] UserId lookup failed, trying general lookup as fallback:', error);
+            // Nếu thất bại, thử fetchUserProfile thông thường
+            dispatch(fetchUserProfile(userId));
+          });
+          
+        dispatch(fetchUserPosts({ identifier: userId, page: 1, limit: 20 }));
+      }
+      // Trường hợp 3: Fallback vào phương thức thông thường nếu cả hai tham số trên không được cung cấp
+      else {
+        console.log('[Profile] Fallback to general lookup with identifier:', identifier);
         dispatch(fetchUserProfile(identifier));
         dispatch(fetchUserPosts({ identifier, page: 1, limit: 20 }));
       }
     }
-  }, [dispatch, identifier]);
+  }, [dispatch, identifier, userId, username]);
   
   useEffect(() => {
     if (profile) {
       console.log('Profile data received in component:', profile);
       setProfileForm({
+        username: profile.username || '',
+        displayName: profile.displayName || '',
         bio: profile.bio || '',
-        fullName: profile.fullName || ''
+        profilePicture: profile.profilePicture || ''
       });
     }
   }, [profile]);
+  
+  useEffect(() => {
+    console.log('Tab value changed:', tabValue);
+  }, [tabValue]);
+  
+  useEffect(() => {
+    // Check URL for debug parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('debug')) {
+      setDebugMode(true);
+    }
+  }, []);
   
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
   
   const handleFollowToggle = () => {
-    if (!identifier) return;
+    if (!identifier) {
+      console.error('No identifier provided for follow/unfollow action');
+      return;
+    }
+    
+    if (isOwnProfile) {
+      console.error('Attempted to follow own profile - prevented');
+      showErrorMessage('Bạn không thể theo dõi chính mình!');
+      return;
+    }
+    
+    console.log(`Handling follow toggle for: ${identifier}, current state: ${isFollowing ? 'following' : 'not following'}`);
     
     if (isFollowing) {
-      dispatch(unfollowUser(identifier));
+      dispatch(unfollowUser(identifier))
+        .unwrap()
+        .then(() => {
+          console.log(`Successfully unfollowed ${identifier}`);
+          showSuccessMessage(`Đã bỏ theo dõi`);
+        })
+        .catch(error => {
+          console.error(`Error unfollowing ${identifier}:`, error);
+          showErrorMessage(`Không thể bỏ theo dõi: ${error}`);
+        });
     } else {
-      dispatch(followUser(identifier));
+      dispatch(followUser(identifier))
+        .unwrap()
+        .then(() => {
+          console.log(`Successfully followed ${identifier}`);
+          showSuccessMessage(`Đã theo dõi thành công`);
+        })
+        .catch(error => {
+          console.error(`Error following ${identifier}:`, error);
+          showErrorMessage(`Không thể theo dõi: ${error}`);
+        });
     }
   };
   
@@ -172,15 +390,43 @@ const Profile: React.FC = () => {
     setEditProfileOpen(false);
   };
   
-  const handleSubmitProfileEdit = async () => {
-    if (!currentUser) return;
+  const validateProfileForm = () => {
+    const errors = {
+      username: '',
+      displayName: '',
+      bio: ''
+    };
+    let isValid = true;
     
-    await dispatch(updateUserProfile({
-      bio: profileForm.bio,
-      fullName: profileForm.fullName
-    }));
+    // Username validation
+    if (!profileForm.username) {
+      errors.username = 'Tên người dùng không được để trống';
+      isValid = false;
+    } else if (profileForm.username.length < 3) {
+      errors.username = 'Tên người dùng phải có ít nhất 3 ký tự';
+      isValid = false;
+    } else if (profileForm.username.length > 30) {
+      errors.username = 'Tên người dùng không được vượt quá 30 ký tự';
+      isValid = false;
+    } else if (!/^[a-zA-Z0-9_]+$/.test(profileForm.username)) {
+      errors.username = 'Tên người dùng chỉ được chứa chữ cái, số và dấu gạch dưới';
+      isValid = false;
+    }
     
-    setEditProfileOpen(false);
+    // Display name validation
+    if (!profileForm.displayName) {
+      errors.displayName = 'Tên hiển thị không được để trống';
+      isValid = false;
+    }
+    
+    // Bio validation
+    if (profileForm.bio && profileForm.bio.length > 160) {
+      errors.bio = 'Tiểu sử không được vượt quá 160 ký tự';
+      isValid = false;
+    }
+    
+    setFormErrors(errors);
+    return isValid;
   };
   
   const handleProfileFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -189,6 +435,145 @@ const Profile: React.FC = () => {
       ...prev,
       [name]: value
     }));
+    
+    // Clear error when typing
+    if (formErrors[name as keyof typeof formErrors]) {
+      setFormErrors({
+        ...formErrors,
+        [name]: ''
+      });
+    }
+  };
+  
+  const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      
+      // Validate file size (5MB limit)
+      if (file.size > 5 * 1024 * 1024) {
+        setFormErrors({
+          ...formErrors,
+          displayName: 'Kích thước ảnh không được vượt quá 5MB'
+        });
+        return;
+      }
+      
+      // Validate file type
+      if (!file.type.match('image.*')) {
+        setFormErrors({
+          ...formErrors,
+          displayName: 'Vui lòng chọn file ảnh hợp lệ'
+        });
+        return;
+      }
+      
+      setProfilePictureFile(file);
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfilePicturePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+  
+  const uploadProfilePicture = async () => {
+    if (!profilePictureFile) return null;
+    
+    try {
+      setUploading(true);
+      
+      // Create form data for file upload
+      const formData = new FormData();
+      formData.append('profilePicture', profilePictureFile);
+      
+      // Simulated upload progress
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 95) {
+            clearInterval(progressInterval);
+            return 95;
+          }
+          return prev + 5;
+        });
+      }, 200);
+      
+      // Make the upload API call
+      const response = await fetch(`${process.env.REACT_APP_SOCIAL_API_URL}/api/v1/uploads/profile-picture`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          // No Content-Type header for FormData
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      clearInterval(progressInterval);
+      
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+      
+      const data = await response.json();
+      setUploadProgress(100);
+      
+      // Return the URL of the uploaded image
+      return data.url;
+    } catch (error) {
+      console.error('Error uploading profile picture:', error);
+      setFormErrors({
+        ...formErrors,
+        displayName: 'Lỗi khi tải lên ảnh đại diện'
+      });
+      return null;
+    } finally {
+      setUploading(false);
+    }
+  };
+  
+  const handleSubmitProfileEdit = async () => {
+    if (!validateProfileForm()) return;
+    
+    setLoading(true);
+    
+    try {
+      // Upload profile picture if changed
+      let profilePictureUrl = profileForm.profilePicture;
+      if (profilePictureFile) {
+        const uploadedUrl = await uploadProfilePicture();
+        if (uploadedUrl) {
+          profilePictureUrl = uploadedUrl;
+        }
+      }
+      
+      // Update profile with API
+      await dispatch(updateUserProfile({
+        username: profileForm.username,
+        displayName: profileForm.displayName,
+        bio: profileForm.bio,
+        profilePicture: profilePictureUrl
+      }));
+      
+      setSnackbarMessage('Hồ sơ đã được cập nhật thành công');
+      setSnackbarOpen(true);
+      setEditProfileOpen(false);
+      
+      // Clear temp data
+      setProfilePictureFile(null);
+      setProfilePicturePreview(null);
+      
+      // Update URL if username changed
+      if (profileForm.username !== profile?.username) {
+        navigate(`/@${profileForm.username}`);
+      }
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      setSnackbarMessage('Lỗi khi cập nhật hồ sơ');
+      setSnackbarOpen(true);
+    } finally {
+      setLoading(false);
+    }
   };
   
   const handleOpenFollowers = () => {
@@ -257,6 +642,22 @@ const Profile: React.FC = () => {
     navigate(`/post/${postId}`);
   };
   
+  const showSuccessMessage = (message: string) => {
+    setSnackbarMessage(message);
+    setSnackbarSeverity('success');
+    setSnackbarOpen(true);
+  };
+  
+  const showErrorMessage = (message: string) => {
+    setSnackbarMessage(message);
+    setSnackbarSeverity('error');
+    setSnackbarOpen(true);
+  };
+  
+  const toggleDebugMode = () => {
+    setDebugMode(prev => !prev);
+  };
+  
   if (profileLoading && !profile) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
@@ -282,14 +683,73 @@ const Profile: React.FC = () => {
           <li>The URL you entered is incorrect</li>
           <li>The user ID doesn't exist in the system</li>
         </ul>
-        <Button 
-          variant="contained" 
-          color="primary" 
-          onClick={() => navigate('/')} 
-          sx={{ mt: 2 }}
-        >
-          Return to Home
-        </Button>
+        <Box sx={{ mt: 3, display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+          <Button 
+            variant="contained" 
+            color="primary" 
+            onClick={() => navigate('/')} 
+            sx={{ minWidth: 200 }}
+          >
+            Return to Home
+          </Button>
+          
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            If you know the username, try accessing the profile directly:
+          </Typography>
+          
+          <Box sx={{ display: 'flex', gap: 1, width: '100%', maxWidth: 300, mt: 1 }}>
+            <TextField
+              size="small"
+              placeholder="Enter username"
+              fullWidth
+              InputProps={{
+                startAdornment: <InputAdornment position="start">@</InputAdornment>,
+              }}
+              onChange={(e) => setSearchUsername(e.target.value)}
+              value={searchUsername}
+            />
+            <Button 
+              variant="outlined"
+              onClick={() => navigate(`/@${searchUsername}`)}
+              disabled={!searchUsername}
+            >
+              Go
+            </Button>
+          </Box>
+          
+          <Divider sx={{ width: '100%', my: 2 }} />
+          
+          <Typography variant="body2">
+            Need help? Use our debugging tools:
+          </Typography>
+          
+          <Button 
+            variant="outlined" 
+            color="info" 
+            size="small"
+            onClick={() => navigate(`/debug/profile`)}
+            sx={{ mt: 1 }}
+          >
+            Debug Profile API
+          </Button>
+          
+          {identifier && (
+            <Button 
+              variant="text" 
+              color="secondary" 
+              size="small"
+              onClick={() => {
+                // Chuyển sang chế độ debug với identifier hiện tại
+                const debugParams = new URLSearchParams();
+                debugParams.set('id', identifier);
+                navigate(`/debug/profile?${debugParams.toString()}`);
+              }}
+              sx={{ mt: 1 }}
+            >
+              Debug this user ID
+            </Button>
+          )}
+        </Box>
       </Paper>
     );
   }
@@ -297,7 +757,7 @@ const Profile: React.FC = () => {
   return (
     <Box>
       <Box sx={{ mb: 4 }}>
-        <Box sx={{ 
+        <Box sx={{
           display: 'flex', 
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -467,7 +927,7 @@ const Profile: React.FC = () => {
             emptyMessage="No followers yet"
             loading={profileLoading}
             currentUserId={currentUser?.id}
-            isFollowing={(userId) => {
+            isFollowing={(userId: string) => {
               // Implement proper following check
               return false;
             }}
@@ -498,7 +958,7 @@ const Profile: React.FC = () => {
             emptyMessage="Not following anyone yet"
             loading={profileLoading}
             currentUserId={currentUser?.id}
-            isFollowing={(userId) => {
+            isFollowing={(userId: string) => {
               // Implement proper following check
               return true;
             }}
@@ -513,38 +973,124 @@ const Profile: React.FC = () => {
       >
         <Box sx={modalStyle}>
           <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
-            Edit Profile
+            Chỉnh sửa hồ sơ
           </Typography>
+          
+          {/* Profile Picture Upload */}
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
+            <Badge
+              overlap="circular"
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              badgeContent={
+                <Tooltip title="Thay đổi ảnh đại diện">
+                  <IconButton 
+                    component="label" 
+                    sx={{ 
+                      bgcolor: theme.palette.primary.main, 
+                      color: 'white',
+                      '&:hover': { bgcolor: theme.palette.primary.dark }
+                    }}
+                    size="small"
+                  >
+                    <PhotoCameraIcon fontSize="small" />
+                    <input
+                      hidden
+                      accept="image/*"
+                      type="file"
+                      onChange={handleProfilePictureChange}
+                    />
+                  </IconButton>
+                </Tooltip>
+              }
+            >
+              <Avatar
+                alt={profileForm.displayName}
+                src={profilePicturePreview || profileForm.profilePicture}
+                sx={{ width: 100, height: 100 }}
+              />
+            </Badge>
+          </Box>
+          
+          {uploading && (
+            <Box sx={{ width: '100%', mb: 2 }}>
+              <LinearProgress variant="determinate" value={uploadProgress} />
+            </Box>
+          )}
+          
           <TextField
-            name="fullName"
-            label="Display Name"
-            value={profileForm.fullName}
+            name="username"
+            label="Tên người dùng"
+            value={profileForm.username}
             onChange={handleProfileFormChange}
             fullWidth
             margin="normal"
+            error={!!formErrors.username}
+            helperText={formErrors.username || "Tên người dùng dùng để truy cập hồ sơ của bạn (@username)"}
+            InputProps={{
+              startAdornment: <InputAdornment position="start">@</InputAdornment>,
+            }}
           />
+          
+          <TextField
+            name="displayName"
+            label="Tên hiển thị"
+            value={profileForm.displayName}
+            onChange={handleProfileFormChange}
+            fullWidth
+            margin="normal"
+            error={!!formErrors.displayName}
+            helperText={formErrors.displayName}
+          />
+          
           <TextField
             name="bio"
-            label="Bio"
+            label="Tiểu sử"
             value={profileForm.bio}
             onChange={handleProfileFormChange}
             fullWidth
             margin="normal"
             multiline
             rows={3}
+            error={!!formErrors.bio}
+            helperText={formErrors.bio || `${profileForm.bio.length}/160 ký tự`}
           />
+          
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-            <Button onClick={handleCloseEditProfile}>Cancel</Button>
+            <Button onClick={handleCloseEditProfile}>Hủy</Button>
             <Button 
               onClick={handleSubmitProfileEdit} 
               variant="contained"
-              disabled={profileLoading}
+              disabled={profileLoading || uploading}
             >
-              Save
+              Lưu thay đổi
             </Button>
           </Box>
         </Box>
       </Modal>
+      
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={6000}
+        onClose={() => setSnackbarOpen(false)}
+      >
+        <Alert 
+          onClose={() => setSnackbarOpen(false)} 
+          severity={snackbarSeverity} 
+          sx={{ width: '100%' }}
+        >
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
+      
+      <DebugInfo 
+        profile={profile} 
+        currentUser={currentUser} 
+        isOwnProfile={isOwnProfile} 
+        identifier={identifier || null}
+        debugMode={debugMode}
+        toggleDebugMode={toggleDebugMode}
+      />
     </Box>
   );
 };

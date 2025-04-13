@@ -2,9 +2,13 @@ import axios from 'axios';
 import { store } from '../app/store';
 import { logout } from '../features/auth/authSlice';
 
+// API URLs
+const AUTH_API_URL = process.env.REACT_APP_AUTH_API_URL || 'http://localhost:8080';
+const SOCIAL_API_URL = process.env.REACT_APP_SOCIAL_API_URL || 'http://localhost:8081';
+
 // Create axios instance
 const axiosInstance = axios.create({
-  baseURL: process.env.REACT_APP_AUTH_API_URL || 'http://localhost:8080',
+  baseURL: AUTH_API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -15,7 +19,21 @@ const axiosInstance = axios.create({
 // Debug các request và response
 axiosInstance.interceptors.request.use(
   (config) => {
-    console.log('Gửi request đến:', config.url, 'với method:', config.method);
+    // Route-based API selection
+    if (config.url?.startsWith('/api/v1/posts') || 
+        config.url?.startsWith('/api/v1/profiles') ||
+        config.url?.startsWith('/api/v1/follows') ||
+        config.url?.startsWith('/api/v1/comments')) {
+      // Social service endpoints
+      config.baseURL = SOCIAL_API_URL;
+      console.log('Using SOCIAL API:', SOCIAL_API_URL);
+    } else {
+      // Auth service endpoints
+      config.baseURL = AUTH_API_URL;
+      console.log('Using AUTH API:', AUTH_API_URL);
+    }
+
+    console.log('Gửi request đến:', config.baseURL + config.url, 'với method:', config.method);
     if (config.data) {
       console.log('Dữ liệu gửi đi:', JSON.stringify(config.data));
     }

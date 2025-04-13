@@ -25,12 +25,18 @@ export const fetchComments = createAsyncThunk<
   try {
     const response = await axiosInstance.get(`/api/v1/posts/${postId}/comments?page=${page}&limit=${limit}`);
     
+    console.log('Comments response:', response.data);
+    
     if (response.data.status === 'error') {
       return rejectWithValue(response.data.message || 'Failed to fetch comments');
     }
     
-    return response.data.data;
+    // The API returns { status, data: { replies: [...], pagination: {...} } }
+    // We need to extract the replies array
+    const replies = response.data.data?.replies || [];
+    return replies;
   } catch (error: any) {
+    console.error('Error fetching comments:', error);
     return rejectWithValue(error.response?.data?.message || 'Failed to fetch comments');
   }
 });
@@ -45,13 +51,38 @@ export const addComment = createAsyncThunk<
   
   try {
     const response = await axiosInstance.post(`/api/v1/posts/${postId}/comments`, { content });
+    console.log('Add comment response:', response.data);
     
     if (response.data.status === 'error') {
       return rejectWithValue(response.data.message || 'Failed to add comment');
     }
     
-    return response.data.data;
+    // The API returns a post structure, we need to transform it to a comment structure
+    const postData = response.data.data.post;
+    
+    // Transform the post to a comment structure that our UI expects
+    const comment: Comment = {
+      id: postData.id,
+      content: postData.content,
+      post: postId,  // This is post ID
+      likes: postData.likeCount || 0,
+      likeCount: postData.likeCount || 0,
+      isLiked: false,
+      parentId: postData.parentId,
+      repliesCount: 0,
+      createdAt: postData.createdAt,
+      updatedAt: postData.updatedAt,
+      author: postData.profile || {
+        id: postData.profileId,
+        username: 'Unknown',
+        displayName: 'Unknown User',
+        profilePicture: null
+      }
+    };
+    
+    return comment;
   } catch (error: any) {
+    console.error('Error adding comment:', error);
     return rejectWithValue(error.response?.data?.message || 'Failed to add comment');
   }
 });

@@ -1,96 +1,138 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Typography, Divider, CircularProgress, Button } from '@mui/material';
-import UserCard from './UserCard';
+import React from 'react';
+import { Box, Typography, List, ListItem, ListItemText, ListItemAvatar, Avatar, Button, Divider, CircularProgress } from '@mui/material';
 import { User } from '../types';
+import { useNavigate } from 'react-router-dom';
+import UserAvatar from './UserAvatar';
+import Pagination from './Pagination';
 
 interface UserListProps {
-  title: string;
   users: User[];
-  emptyMessage: string;
-  loading: boolean;
+  title?: string;
+  emptyMessage?: string;
+  onFollowToggle?: (userId: string, isFollowing: boolean) => void;
+  loading?: boolean;
+  showPagination?: boolean;
+  pagination?: {
+    total: number;
+    page: number;
+    limit: number;
+    pages: number;
+  };
+  onPageChange?: (page: number) => void;
   currentUserId?: string;
-  onLoadMore?: () => void;
-  hasMore?: boolean;
   isFollowing?: (userId: string) => boolean;
 }
 
-const UserList: React.FC<UserListProps> = ({
-  title,
-  users,
-  emptyMessage,
-  loading,
+const UserList: React.FC<UserListProps> = ({ 
+  users, 
+  title, 
+  emptyMessage = 'Không có người dùng nào', 
+  onFollowToggle,
+  loading = false,
+  showPagination = false,
+  pagination,
+  onPageChange,
   currentUserId,
-  onLoadMore,
-  hasMore = false,
   isFollowing
 }) => {
-  const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    // Initialize following status for each user if isFollowing function is provided
-    if (isFollowing && users.length > 0) {
-      const newFollowingMap: Record<string, boolean> = {};
-      users.forEach(user => {
-        newFollowingMap[user.id] = isFollowing(user.id);
-      });
-      setFollowingMap(newFollowingMap);
-    }
-  }, [users, isFollowing]);
+  const handleUserClick = (userId: string) => {
+    navigate(`/profile/${userId}`);
+  };
 
-  const handleFollowToggle = (userId: string) => {
-    if (isFollowing) {
-      setFollowingMap(prev => ({
-        ...prev,
-        [userId]: !prev[userId]
-      }));
+  const handleFollowToggle = (userId: string, isFollowing: boolean, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onFollowToggle) {
+      onFollowToggle(userId, isFollowing);
     }
   };
 
-  return (
-    <Box sx={{ width: '100%', maxWidth: 600, mx: 'auto', p: 2 }}>
-      <Typography variant="h6" component="h2" gutterBottom>
-        {title}
-      </Typography>
-      <Divider sx={{ mb: 2 }} />
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
-      {loading && users.length === 0 ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
-          <CircularProgress />
-        </Box>
-      ) : users.length === 0 ? (
-        <Typography color="text.secondary" align="center" sx={{ my: 4 }}>
+  return (
+    <Box>
+      {title && (
+        <Typography variant="h6" sx={{ mb: 2 }}>
+          {title}
+        </Typography>
+      )}
+      
+      {users.length === 0 ? (
+        <Typography color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
           {emptyMessage}
         </Typography>
       ) : (
-        <Box>
-          {users.map(user => (
-            <UserCard
-              key={user.id}
-              user={user}
-              isCurrentUser={user.id === currentUserId}
-              isFollowing={isFollowing ? followingMap[user.id] : false}
-              onFollowToggle={() => handleFollowToggle(user.id)}
+        <>
+          <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
+            {users.map((user, index) => (
+              <React.Fragment key={user.id}>
+                <ListItem
+                  alignItems="center"
+                  onClick={() => handleUserClick(user.id)}
+                  sx={{ 
+                    cursor: 'pointer',
+                    '&:hover': {
+                      bgcolor: 'action.hover'
+                    },
+                    py: 1.5
+                  }}
+                >
+                  <ListItemAvatar>
+                    <UserAvatar user={user} size={50} />
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={
+                      <Typography fontWeight="bold">
+                        {user.displayName || user.username}
+                        {user.isVerified && ' ✓'}
+                      </Typography>
+                    }
+                    secondary={
+                      <Typography variant="body2" color="text.secondary">
+                        @{user.username}
+                        {user.bio && (
+                          <Box component="div" sx={{ mt: 0.5 }}>
+                            {user.bio.length > 50 ? `${user.bio.slice(0, 50)}...` : user.bio}
+                          </Box>
+                        )}
+                      </Typography>
+                    }
+                    sx={{ mr: 2 }}
+                  />
+                  {onFollowToggle && user.id !== currentUserId && (
+                    <Button
+                      variant={user.isFollowing ? "outlined" : "contained"}
+                      size="small"
+                      onClick={(e) => handleFollowToggle(user.id, !!user.isFollowing, e)}
+                      sx={{ minWidth: 100 }}
+                    >
+                      {user.isFollowing ? 'Đang theo dõi' : 'Theo dõi'}
+                    </Button>
+                  )}
+                </ListItem>
+                {index < users.length - 1 && <Divider component="li" />}
+              </React.Fragment>
+            ))}
+          </List>
+          
+          {showPagination && pagination && onPageChange && (
+            <Pagination
+              currentPage={pagination.page}
+              totalPages={pagination.pages}
+              totalItems={pagination.total}
+              onPageChange={onPageChange}
+              itemsPerPage={pagination.limit}
+              loading={loading}
             />
-          ))}
-
-          {loading && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
-              <CircularProgress size={30} />
-            </Box>
           )}
-
-          {hasMore && !loading && onLoadMore && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-              <Button 
-                onClick={onLoadMore} 
-                variant="outlined"
-                sx={{ borderRadius: 6 }}
-              >
-                Load More
-              </Button>
-            </Box>
-          )}
-        </Box>
+        </>
       )}
     </Box>
   );

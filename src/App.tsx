@@ -1,7 +1,8 @@
-import React, { useState, useEffect, ReactElement } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider, CssBaseline } from '@mui/material';
-import { Provider, useSelector } from 'react-redux';
+import React, { Suspense, useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, useLocation, Outlet, Navigate } from 'react-router-dom';
+import { useSelector, useDispatch } from 'react-redux';
+import { Box, CircularProgress, Container, ThemeProvider, CssBaseline } from '@mui/material';
+import { Provider } from 'react-redux';
 import { store } from './app/store';
 import { darkTheme, lightTheme } from './utils/theme';
 import MainLayout from './layouts/MainLayout';
@@ -12,6 +13,7 @@ import { AuthState } from './types';
 const Home = React.lazy(() => import('./pages/Home'));
 const Login = React.lazy(() => import('./pages/Login'));
 const Register = React.lazy(() => import('./pages/Register'));
+const ResetPassword = React.lazy(() => import('./pages/ResetPassword'));
 const Profile = React.lazy(() => import('./pages/Profile'));
 const Search = React.lazy(() => import('./pages/Search'));
 const Notifications = React.lazy(() => import('./pages/Notifications'));
@@ -21,30 +23,50 @@ const NotFound = React.lazy(() => import('./pages/NotFound'));
 const ProfileDebug = React.lazy(() => import('./pages/ProfileDebug'));
 
 // Add a loading component
-const Loading = () => <div>Loading...</div>;
+const LoadingComponent = () => (
+  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+    <CircularProgress />
+  </Box>
+);
 
-// Protected route component
-const ProtectedRoute = ({ children }: { children: ReactElement }) => {
-  const auth = useSelector((state: RootState) => state.auth as AuthState);
-  const { isAuthenticated } = auth;
-  
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+// Auth guard component
+const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated, isLoading } = useSelector<RootState, AuthState>(state => state.auth);
+  const location = useLocation();
+
+  if (isLoading) {
+    return <LoadingComponent />;
   }
-  
-  return children;
+
+  if (!isAuthenticated) {
+    // Redirect to login
+    window.location.href = `/login?redirect=${encodeURIComponent(location.pathname)}`;
+    return null;
+  }
+
+  return <>{children}</>;
 };
 
 // Public route component (redirects to home if already authenticated)
-const PublicRoute = ({ children }: { children: ReactElement }) => {
-  const auth = useSelector((state: RootState) => state.auth as AuthState);
-  const { isAuthenticated } = auth;
+const PublicRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated } = useSelector<RootState, AuthState>(state => state.auth);
   
   if (isAuthenticated) {
     return <Navigate to="/" replace />;
   }
   
-  return children;
+  return <>{children}</>;
+};
+
+// Protected route component
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated } = useSelector<RootState, AuthState>(state => state.auth);
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+  
+  return <>{children}</>;
 };
 
 function AppContent() {
@@ -65,7 +87,7 @@ function AppContent() {
     <ThemeProvider theme={isDarkMode ? darkTheme : lightTheme}>
       <CssBaseline />
       <Router>
-        <React.Suspense fallback={<Loading />}>
+        <React.Suspense fallback={<LoadingComponent />}>
           <Routes>
             {/* Public routes */}
             <Route 
@@ -81,6 +103,14 @@ function AppContent() {
               element={
                 <PublicRoute>
                   <Register />
+                </PublicRoute>
+              } 
+            />
+            <Route 
+              path="/reset-password" 
+              element={
+                <PublicRoute>
+                  <ResetPassword />
                 </PublicRoute>
               } 
             />
@@ -101,6 +131,7 @@ function AppContent() {
               <Route path="profile/:userId" element={<Profile />} />
               <Route path="@:username" element={<Profile />} />
               <Route path="post/:postId" element={<PostDetail />} />
+              {/* Debug routes - use for troubleshooting */}
               <Route path="debug/profile" element={<ProfileDebug />} />
               <Route path="*" element={<NotFound />} />
             </Route>
