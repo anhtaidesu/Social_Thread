@@ -1,46 +1,91 @@
-# Getting Started with Create React App
+# Threads Clone Frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A modern React application that provides a UI similar to Instagram Threads.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+- **Authentication**: Login, registration, and password recovery
+- **Feed**: View and interact with posts from users you follow
+- **Create Posts**: Share text and images with your followers
+- **Profiles**: View user profiles and follow/unfollow users
+- **Notifications**: Get notified of likes, comments, follows, and mentions
+- **Dark/Light Mode**: Toggle between dark and light themes
 
-### `npm start`
+## Technologies Used
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+- **React**: Frontend library for building user interfaces
+- **TypeScript**: Static typing for JavaScript
+- **Redux Toolkit**: State management
+- **React Router**: Navigation and routing
+- **Material UI**: UI component library
+- **Axios**: HTTP client for API requests
+- **Socket.IO**: Real-time notifications
+- **date-fns**: Date formatting
+- **Zod**: Runtime type validation
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+## Getting Started
 
-### `npm test`
+### Prerequisites
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+- Node.js (v14+)
+- npm or yarn
+- Backend services running (Authentication and Social services)
 
-### `npm run build`
+### Installation
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+1. Clone the repository
+2. Install dependencies:
+```bash
+npm install
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+3. Set up environment variables:
+- Create a `.env` file in the root directory
+- Add the following variables:
+```
+REACT_APP_AUTH_API_URL=http://localhost:8080
+REACT_APP_SOCIAL_API_URL=http://localhost:8086
+```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+4. Start the development server:
+```bash
+npm start
+```
 
-### `npm run eject`
+## Project Structure
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+```
+src/
+├── app/                # Store configuration
+├── components/         # Reusable components
+├── features/           # Redux slices and related components
+├── hooks/              # Custom hooks
+├── layouts/            # Page layouts
+├── pages/              # Page components
+├── services/           # API services
+├── types/              # TypeScript type definitions
+├── utils/              # Utility functions
+└── ...
+```
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+## Backend Services
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+This frontend connects to two microservices:
+- **Authentication Service**: Handles user authentication, registration, and profile management
+- **Social Service**: Manages posts, comments, likes, follows, and notifications
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+Make sure both services are running before starting the frontend.
 
-## Learn More
+## Deployment
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+To build the application for production:
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+```bash
+npm run build
+```
+
+The build artifacts will be stored in the `build/` directory.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

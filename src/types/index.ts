@@ -1,0 +1,100 @@
+export interface User {
+  id: string;
+  userId?: string; 
+  username: string;
+  displayName?: string;
+  fullName?: string; // For backward compatibility
+  bio?: string;
+  profilePicture?: string | null;
+  coverPicture?: string | null;
+  isVerified?: boolean;
+  followerCount?: number;
+  followingCount?: number;
+  followersCount?: number; // For backward compatibility
+  postCount?: number;
+  lastActive?: string;
+  createdAt: string;
+  updatedAt?: string;
+  
+  // Thông tin bổ sung có thể có từ API profile
+  email?: string;
+  isFollowing?: boolean;
+  isFollowedBy?: boolean;
+  website?: string;
+  location?: string;
+  isPrivate?: boolean;
+  deletedAt?: string | null;
+}
+
+export interface Post {
+  id: string;
+  profileId?: string;
+  content: string;
+  author?: User;
+  profile?: User;
+  
+  // Frontend properties (existing code)
+  images?: string[];
+  likesCount?: number;
+  commentsCount?: number;
+  repostsCount?: number;
+  
+  // Backend properties (from API)
+  mediaUrls?: string | string[];
+  likeCount?: number;
+  commentCount?: number;
+  repostCount?: number;
+  parentId?: string;
+  rootThreadId?: string;
+  threadPosition?: number;
+  isRepost?: boolean;
+  originalPostId?: string;
+  tags?: string | string[];
+  mentions?: string | string[];
+  isPublic?: boolean;
+  
+  isLiked?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+export interface Comment {
+  id: string;
+  content: string;
+  author: User;
+  post: string; // Post ID
+  likes: number;
+  isLiked?: boolean;
+  parentId?: string;
+  repliesCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Notification {
+  id: string;
+  type: 'like' | 'comment' | 'follow' | 'repost' | 'mention';
+  sender: User;
+  receiver: string; // User ID
+  post?: string; // Post ID
+  comment?: string; // Comment ID
+  read: boolean;
+  createdAt: string;
+}
+
+export interface AuthState {
+  user: User | null;
+  token: string | null;
+  refreshToken: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  error: string | null;
+  otpSent: boolean;
+  otpEmail: string | null;
+}
+
+export interface ErrorResponse {
+  message: string;
+  status: number;
+} 
