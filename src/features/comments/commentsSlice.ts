@@ -34,7 +34,23 @@ export const fetchComments = createAsyncThunk<
     // The API returns { status, data: { replies: [...], pagination: {...} } }
     // We need to extract the replies array
     const replies = response.data.data?.replies || [];
-    return replies;
+    
+    // Ensure each comment has proper author information
+    const validatedReplies = replies.map((reply: any) => {
+      if (!reply.author) {
+        // If author is missing, add a placeholder
+        reply.author = {
+          id: reply.profileId || 'unknown',
+          username: 'Unknown',
+          displayName: 'Unknown User',
+          profilePicture: null,
+          createdAt: reply.createdAt || new Date().toISOString()
+        };
+      }
+      return reply;
+    });
+    
+    return validatedReplies;
   } catch (error: any) {
     console.error('Error fetching comments:', error);
     return rejectWithValue(error.response?.data?.message || 'Failed to fetch comments');
@@ -72,11 +88,12 @@ export const addComment = createAsyncThunk<
       repliesCount: 0,
       createdAt: postData.createdAt,
       updatedAt: postData.updatedAt,
-      author: postData.profile || {
-        id: postData.profileId,
+      author: postData.profile || postData.author || {
+        id: postData.profileId || 'unknown',
         username: 'Unknown',
         displayName: 'Unknown User',
-        profilePicture: null
+        profilePicture: null,
+        createdAt: new Date().toISOString()
       }
     };
     

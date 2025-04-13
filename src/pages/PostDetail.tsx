@@ -42,6 +42,9 @@ const PostDetail: React.FC = () => {
     }
   }, [dispatch, postId]);
   
+  // Ensure comments is always an array
+  const safeComments = Array.isArray(comments) ? comments : [];
+  
   const handleAddComment = (content: string) => {
     if (!postId || !content.trim()) return;
     
@@ -49,7 +52,7 @@ const PostDetail: React.FC = () => {
   };
   
   const handleLikeComment = (commentId: string) => {
-    const comment = comments.find(c => c.id === commentId);
+    const comment = safeComments.find(c => c.id === commentId);
     if (!comment) return;
     
     if (comment.isLiked) {
@@ -110,7 +113,7 @@ const PostDetail: React.FC = () => {
       
       <CommentSection 
         postId={postId || ''}
-        comments={comments}
+        comments={safeComments}
         isLoading={commentsLoading}
         onAddComment={handleAddComment}
         onLikeComment={handleLikeComment}

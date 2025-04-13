@@ -111,15 +111,15 @@ const CommentSection: React.FC<CommentSectionProps> = ({
           <CardContent sx={{ pb: 1 }}>
             <Box sx={{ display: 'flex', mb: 1 }}>
               <UserAvatar 
-                src={comment.author.profilePicture}
-                username={comment.author.username}
+                src={comment.author?.profilePicture || undefined}
+                username={comment.author?.username || 'Unknown'}
                 sx={{ 
                   width: 32, 
                   height: 32, 
                   mr: 1.5,
                   cursor: 'pointer'
                 }}
-                onClick={() => handleUserClick(comment.author.id)}
+                onClick={() => comment.author && handleUserClick(comment.author.id)}
               />
               <Box sx={{ flexGrow: 1 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -127,10 +127,10 @@ const CommentSection: React.FC<CommentSectionProps> = ({
                     variant="subtitle2" 
                     component="span" 
                     fontWeight="bold"
-                    onClick={() => handleUserClick(comment.author.id)}
+                    onClick={() => comment.author && handleUserClick(comment.author.id)}
                     sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
                   >
-                    {comment.author.username}
+                    {comment.author?.username || 'Unknown User'}
                   </Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Typography variant="caption" color="text.secondary">
