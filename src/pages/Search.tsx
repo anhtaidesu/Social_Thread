@@ -218,7 +218,7 @@ const Search: React.FC = () => {
                           }}
                           sx={{ borderRadius: 5 }}
                         >
-                          Follow
+                          123
                         </Button>
                       </Box>
                     }

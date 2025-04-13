@@ -125,6 +125,13 @@ const DebugInfo: React.FC<DebugInfoProps> = ({
   debugMode,
   toggleDebugMode 
 }) => {
+  // Gọi useParams trước câu lệnh điều kiện, không phụ thuộc vào debugMode
+  const { userId, username } = useParams<{ userId?: string; username?: string }>();
+  const urlParams = new URLSearchParams(window.location.search);
+  const queryParamId = urlParams.get('id');
+  const urlId = userId || queryParamId;
+  
+  // Điều kiện return sau khi đã gọi tất cả các hook
   if (!debugMode) return null;
   
   return (
@@ -132,6 +139,26 @@ const DebugInfo: React.FC<DebugInfoProps> = ({
       <Typography variant="h6" color="primary">Debug Information</Typography>
       <Typography variant="body2"><strong>URL Identifier:</strong> {identifier || 'None'}</Typography>
       <Typography variant="body2"><strong>Is Own Profile:</strong> {isOwnProfile ? 'Yes' : 'No'}</Typography>
+      
+      <Divider sx={{ my: 1 }} />
+      <Typography variant="subtitle2">URL Params:</Typography>
+      <Box component="pre" sx={{ 
+        maxHeight: 150, 
+        overflow: 'auto', 
+        fontSize: '0.75rem',
+        p: 1,
+        bgcolor: '#e0e0e0',
+        borderRadius: 1
+      }}>
+        {JSON.stringify({
+          path: window.location.pathname,
+          userId,
+          username,
+          queryParamId,
+          urlId
+        }, null, 2)}
+      </Box>
+      
       <Divider sx={{ my: 1 }} />
       
       <Typography variant="subtitle2">Current User:</Typography>
@@ -146,6 +173,7 @@ const DebugInfo: React.FC<DebugInfoProps> = ({
         }}>
           {JSON.stringify({
             id: currentUser.id,
+            userId: currentUser.userId,
             username: currentUser.username,
             displayName: currentUser.displayName
           }, null, 2)}
@@ -168,6 +196,7 @@ const DebugInfo: React.FC<DebugInfoProps> = ({
         }}>
           {JSON.stringify({
             id: profile.id,
+            userId: profile.userId,
             username: profile.username,
             displayName: profile.displayName,
             followersCount: profile.followersCount,
@@ -198,7 +227,25 @@ const Profile: React.FC = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch<AppDispatch>();
   
+  // Lấy identifier từ URL param
   const identifier = username ? username : userId;
+  
+  // Lấy ID từ URL param (có thể từ đường dẫn hoặc từ query parameters)
+  const urlParams = new URLSearchParams(window.location.search);
+  const queryParamId = urlParams.get('id');
+  
+  // ID có thể là userId từ path, hoặc từ query parameter id
+  const urlId = userId || queryParamId;
+  
+  // Log thông tin chi tiết về identifier và ID
+  console.log('URL Params:', { 
+    path: window.location.pathname,
+    userId, 
+    username, 
+    identifier,
+    queryParamId,
+    urlId
+  });
   
   const { profile, followers, following, isLoading: profileLoading, error: profileError } = useSelector((state: RootState) => state.userProfile); 
   const { userPosts, isLoading: postsLoading } = useSelector((state: RootState) => state.posts); 
@@ -250,26 +297,38 @@ const Profile: React.FC = () => {
     // Also check username as a fallback
     const usernameMatch = currentUser.username === profile.username;
     
-    const result = userIdMatch || profileIdMatch || usernameMatch;
+    // Compare with URL ID param (userId from path or id from query param)
+    const urlIdMatch = urlId ? (urlId === currentUser.id || urlId === currentUser.userId) : false;
+    
+    // Check if URL username matches current user
+    const urlUsernameMatch = username ? username.replace(/^@/, '') === currentUser.username : false;
+    
+    const result = userIdMatch || profileIdMatch || usernameMatch || urlIdMatch || urlUsernameMatch;
+    
     console.log('isOwnProfile check:', { 
       userIdMatch, 
       profileIdMatch, 
       usernameMatch,
+      urlIdMatch,
+      urlUsernameMatch,
       currentUserId: currentUser.id,
+      currentUserUserId: currentUser.userId,
       profileId: profile.id,
+      profileUserId: profile.userId,
+      urlId,
       currentUserUsername: currentUser.username,
       profileUsername: profile.username,
       result 
     });
     
     return result;
-  }, [currentUser, profile]);
+  }, [currentUser, profile, urlId, username]);
   
   const isFollowing = profile?.isFollowing || false;
   
   useEffect(() => {
     if (identifier) {
-      console.log(`Fetching profile for identifier: ${identifier}, userId: ${userId}, username: ${username}`);
+      console.log(`Fetching profile for identifier: ${identifier}, userId: ${userId}, username: ${username}, urlId: ${urlId}`);
       
       // Reset error state before new fetch
       // dispatch(clearProfileError());
@@ -306,14 +365,27 @@ const Profile: React.FC = () => {
           
         dispatch(fetchUserPosts({ identifier: userId, page: 1, limit: 20 }));
       }
-      // Trường hợp 3: Fallback vào phương thức thông thường nếu cả hai tham số trên không được cung cấp
+      // Trường hợp 3: Sử dụng query param id nếu có
+      else if (queryParamId) {
+        console.log('[Profile] Fetching by query param id:', queryParamId);
+        
+        dispatch(fetchUserProfileByUserId(queryParamId))
+          .unwrap()
+          .catch((error) => {
+            console.log('[Profile] Query param id lookup failed, trying general lookup as fallback:', error);
+            dispatch(fetchUserProfile(queryParamId));
+          });
+          
+        dispatch(fetchUserPosts({ identifier: queryParamId, page: 1, limit: 20 }));
+      }
+      // Trường hợp 4: Fallback vào phương thức thông thường nếu các tham số trên không được cung cấp
       else {
         console.log('[Profile] Fallback to general lookup with identifier:', identifier);
         dispatch(fetchUserProfile(identifier));
         dispatch(fetchUserPosts({ identifier, page: 1, limit: 20 }));
       }
     }
-  }, [dispatch, identifier, userId, username]);
+  }, [dispatch, identifier, userId, username, queryParamId, urlId]);
   
   useEffect(() => {
     if (profile) {
@@ -512,19 +584,30 @@ const Profile: React.FC = () => {
       clearInterval(progressInterval);
       
       if (!response.ok) {
-        throw new Error('Upload failed');
+        const errorData = await response.json();
+        console.error('Upload error response:', errorData);
+        throw new Error(errorData.message || 'Upload failed');
       }
       
       const data = await response.json();
       setUploadProgress(100);
       
-      // Return the URL of the uploaded image
-      return data.url;
+      console.log('Upload response:', data);
+      
+      // Validate URL format
+      if (data.url && typeof data.url === 'string' && data.url.startsWith('http')) {
+        return data.url;
+      } else if (data.data && data.data.url && typeof data.data.url === 'string' && data.data.url.startsWith('http')) {
+        return data.data.url;
+      } else {
+        console.error('Invalid URL format returned from upload API:', data);
+        throw new Error('Server did not return a valid profile picture URL');
+      }
     } catch (error) {
       console.error('Error uploading profile picture:', error);
       setFormErrors({
         ...formErrors,
-        displayName: 'Lỗi khi tải lên ảnh đại diện'
+        displayName: error instanceof Error ? error.message : 'Lỗi khi tải lên ảnh đại diện'
       });
       return null;
     } finally {
@@ -539,13 +622,30 @@ const Profile: React.FC = () => {
     
     try {
       // Upload profile picture if changed
-      let profilePictureUrl = profileForm.profilePicture;
+      let profilePictureUrl: string | undefined = profileForm.profilePicture;
       if (profilePictureFile) {
         const uploadedUrl = await uploadProfilePicture();
         if (uploadedUrl) {
           profilePictureUrl = uploadedUrl;
+        } else {
+          // Nếu không thể tải lên ảnh mới, giữ nguyên ảnh cũ
+          console.log('Unable to upload new profile picture, keeping existing one:', profilePictureUrl);
         }
       }
+      
+      // Validate profilePictureUrl is a valid URL or undefined
+      if (profilePictureUrl && typeof profilePictureUrl === 'string') {
+        // Đảm bảo URL bắt đầu bằng http hoặc https
+        if (!profilePictureUrl.startsWith('http')) {
+          console.log('Profile picture URL is not valid, clearing it:', profilePictureUrl);
+          profilePictureUrl = undefined;
+        }
+      } else {
+        // Nếu không phải string hợp lệ, đặt thành undefined
+        profilePictureUrl = undefined;
+      }
+      
+      console.log('Updating profile with picture URL:', profilePictureUrl);
       
       // Update profile with API
       await dispatch(updateUserProfile({
@@ -567,9 +667,11 @@ const Profile: React.FC = () => {
       if (profileForm.username !== profile?.username) {
         navigate(`/@${profileForm.username}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating profile:', error);
-      setSnackbarMessage('Lỗi khi cập nhật hồ sơ');
+      const errorMessage = error?.message || 'Lỗi khi cập nhật hồ sơ';
+      setSnackbarMessage(`Lỗi: ${errorMessage}`);
+      setSnackbarSeverity('error');
       setSnackbarOpen(true);
     } finally {
       setLoading(false);
@@ -799,22 +901,36 @@ const Profile: React.FC = () => {
           {currentUser && (
             <Box>
               {isOwnProfile ? (
-                <Button
-                  variant="outlined"
-                  onClick={handleEditProfile}
-                  startIcon={<EditIcon />}
-                  sx={{ borderRadius: 6 }}
-                >
-                  Edit profile
-                </Button>
+                <>
+                  <Button
+                    variant="outlined"
+                    onClick={handleEditProfile}
+                    startIcon={<EditIcon />}
+                    sx={{ borderRadius: 6 }}
+                  >
+                    Edit profile
+                  </Button>
+                  {debugMode && (
+                    <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
+                      Showing Edit button (isOwnProfile: true)
+                    </Typography>
+                  )}
+                </>
               ) : (
-                <Button
-                  variant={isFollowing ? "outlined" : "contained"}
-                  onClick={handleFollowToggle}
-                  sx={{ borderRadius: 6 }}
-                >
-                  {isFollowing ? 'Following' : 'Follow'}
-                </Button>
+                <>
+                  <Button
+                    variant={isFollowing ? "outlined" : "contained"}
+                    onClick={handleFollowToggle}
+                    sx={{ borderRadius: 6 }}
+                  >
+                    {isFollowing ? 'Following' : 'Follow'}
+                  </Button>
+                  {debugMode && (
+                    <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
+                      Showing Follow button (isOwnProfile: false)
+                    </Typography>
+                  )}
+                </>
               )}
             </Box>
           )}
