@@ -36,6 +36,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '../app/store';
 import { AuthState } from '../types';
 import { logout } from '../features/auth/authSlice';
+import ConnectionStatus from '../components/ConnectionStatus';
 
 const drawerWidth = 240;
 
@@ -233,6 +234,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({ toggleTheme }) => {
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, fontWeight: 700 }}>
             {isMobile ? 'Threads' : ''}
           </Typography>
+          <Box sx={{ mr: 2 }}>
+            <ConnectionStatus />
+          </Box>
         </Toolbar>
       </StyledAppBar>
       <Box

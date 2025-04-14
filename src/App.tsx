@@ -8,6 +8,11 @@ import { darkTheme, lightTheme } from './utils/theme';
 import MainLayout from './layouts/MainLayout';
 import { RootState } from './app/store';
 import { AuthState } from './types';
+import socketManager from './utils/socketManager';
+import socketService from './services/socket.service';
+import ProfileInitializer from './components/ProfileInitializer';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 // Lazy load pages
 const Home = React.lazy(() => import('./pages/Home'));
@@ -74,6 +79,33 @@ function AppContent() {
     const savedMode = localStorage.getItem('theme');
     return savedMode ? savedMode === 'dark' : true; // Default to dark mode like Threads
   });
+  
+  const { isAuthenticated, token, user } = useSelector<RootState, AuthState>(state => state.auth);
+
+  // Initialize socket service when authenticated
+  useEffect(() => {
+    if (isAuthenticated && token) {
+      console.log('User is authenticated, initializing socket connection');
+      socketManager.initializeSocket(token);
+    } else {
+      console.log('User is not authenticated, disconnecting socket');
+      socketManager.disconnectSocket();
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      socketManager.disconnectSocket();
+    };
+  }, [isAuthenticated, token]);
+  
+  // Reset socket connection if user changes
+  useEffect(() => {
+    if (isAuthenticated && token && user?.id) {
+      // When user ID changes, we need to reset the socket connection
+      console.log('User identity changed, resetting socket connection');
+      socketService.reset();
+    }
+  }, [isAuthenticated, token, user?.id]);
 
   useEffect(() => {
     localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
@@ -151,7 +183,10 @@ function AppContent() {
 function App() {
   return (
     <Provider store={store}>
-      <AppContent />
+      <ProfileInitializer>
+        <AppContent />
+      </ProfileInitializer>
+      <ToastContainer position="top-right" theme="colored" />
     </Provider>
   );
 }

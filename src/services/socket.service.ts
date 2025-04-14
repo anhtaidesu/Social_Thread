@@ -2,9 +2,11 @@ import { io, Socket } from 'socket.io-client';
 import { store } from '../app/store';
 import { addNotification } from '../features/notifications/notificationsSlice';
 import { Notification } from '../types';
+import { updateSocketStatus, SocketStatus, handleProfileMissingError, scheduleReconnect } from '../utils/socketManager';
+import { toast } from 'react-toastify';
 
 // Socket.io configuration
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'ws://localhost:8081';
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || (process.env.REACT_APP_SOCIAL_API_URL ? process.env.REACT_APP_SOCIAL_API_URL.replace('http://', 'ws://') : 'ws://localhost:8081');
 
 class SocketService {
   private socket: Socket | null = null;
@@ -13,13 +15,15 @@ class SocketService {
   private maxReconnectAttempts = 5;
   private reconnectInterval = 5000; // 5 seconds
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private eventHandlers: Map<string, Function[]> = new Map();
 
   /**
    * Initialize the socket connection
    */
   public init(): void {
-    if (this.initialized) {
-      console.log('Socket already initialized');
+    if (this.initialized && this.socket) {
+      console.log('Socket already initialized, reconnecting...');
+      this.connect();
       return;
     }
 
@@ -32,7 +36,11 @@ class SocketService {
         reconnection: false, // We'll handle reconnection manually
         auth: (cb) => {
           // Get the token from Redux store or localStorage
-          const token = store.getState().auth.token || localStorage.getItem('token');
+          const token = store.getState().auth?.token || localStorage.getItem('token');
+          console.log('Providing auth token for socket connection:', token ? 'Token available' : 'No token available');
+          if (!token) {
+            console.warn('No token available for socket authentication');
+          }
           cb({ token });
         }
       });
@@ -42,7 +50,19 @@ class SocketService {
       this.initialized = true;
     } catch (error) {
       console.error('Error initializing socket:', error);
+      updateSocketStatus(SocketStatus.ERROR, error instanceof Error ? error.message : 'Failed to initialize socket');
     }
+  }
+
+  /**
+   * Reset socket connection (for when token changes)
+   */
+  public reset(): void {
+    console.log('Resetting socket connection...');
+    this.disconnect();
+    this.initialized = false;
+    this.socket = null;
+    this.init();
   }
 
   /**
@@ -50,12 +70,21 @@ class SocketService {
    */
   public connect(): void {
     if (!this.socket) {
-      console.error('Socket not initialized');
+      console.error('Socket not initialized, cannot connect');
+      updateSocketStatus(SocketStatus.ERROR, 'Socket not initialized');
       return;
     }
 
-    console.log('Connecting to socket server...');
-    this.socket.connect();
+    console.log('Connecting to socket server at:', SOCKET_URL);
+    try {
+      this.socket.connect();
+      console.log('Socket connection initiated');
+    } catch (error) {
+      console.error('Error connecting to socket server:', error);
+      updateSocketStatus(SocketStatus.ERROR, error instanceof Error ? error.message : 'Failed to connect to socket server');
+      // Let the manager handle reconnection
+      scheduleReconnect();
+    }
   }
 
   /**
@@ -75,6 +104,48 @@ class SocketService {
   }
 
   /**
+   * Register a handler for a custom event
+   */
+  public on(event: string, callback: Function): void {
+    if (!this.eventHandlers.has(event)) {
+      this.eventHandlers.set(event, []);
+    }
+    
+    this.eventHandlers.get(event)?.push(callback);
+    
+    // If socket already exists, add the listener
+    if (this.socket) {
+      this.socket.on(event, (...args) => callback(...args));
+    }
+  }
+
+  /**
+   * Remove handlers for a specific event
+   */
+  public off(event: string): void {
+    this.eventHandlers.delete(event);
+    if (this.socket) {
+      this.socket.off(event);
+    }
+  }
+
+  /**
+   * Emit an event to the server
+   */
+  public emit(event: string, ...args: any[]): void {
+    if (!this.socket || !this.socket.connected) {
+      console.warn(`Cannot emit ${event}: socket not connected`);
+      toast.warning('Cannot send data: not connected to server. Please check your connection.', { 
+        position: 'top-right', 
+        autoClose: 3000 
+      });
+      return;
+    }
+
+    this.socket.emit(event, ...args);
+  }
+
+  /**
    * Setup socket event listeners
    */
   private setupEventListeners(): void {
@@ -87,6 +158,13 @@ class SocketService {
 
     // Application events
     this.socket.on('notification', this.handleNotification.bind(this));
+    
+    // Register any event handlers that were added before socket initialization
+    this.eventHandlers.forEach((callbacks, event) => {
+      callbacks.forEach(callback => {
+        this.socket?.on(event, (...args) => callback(...args));
+      });
+    });
   }
 
   /**
@@ -94,8 +172,16 @@ class SocketService {
    */
   private handleConnect(): void {
     console.log('Socket connected with ID:', this.socket?.id);
-    // Reset reconnect attempts on successful connection
+    updateSocketStatus(SocketStatus.CONNECTED);
     this.reconnectAttempts = 0;
+    
+    // Notify the user of successful connection
+    if (this.reconnectAttempts > 0) {
+      toast.success('Reconnected to real-time services!', { 
+        position: 'top-right', 
+        autoClose: 3000 
+      });
+    }
   }
 
   /**
@@ -103,7 +189,19 @@ class SocketService {
    */
   private handleDisconnect(reason: string): void {
     console.log('Socket disconnected. Reason:', reason);
-    this.attemptReconnect();
+    
+    // Known disconnection reasons that shouldn't trigger a reconnect
+    const plannedDisconnects = ['io client disconnect', 'io server disconnect'];
+    
+    if (plannedDisconnects.includes(reason)) {
+      console.log('Planned disconnect, not attempting reconnect');
+      updateSocketStatus(SocketStatus.DISCONNECTED);
+    } else {
+      console.log('Unplanned disconnect, scheduling reconnect');
+      updateSocketStatus(SocketStatus.DISCONNECTED, `Disconnected: ${reason}`);
+      // Use the manager's reconnection strategy
+      scheduleReconnect();
+    }
   }
 
   /**
@@ -111,31 +209,18 @@ class SocketService {
    */
   private handleConnectError(error: Error): void {
     console.error('Socket connection error:', error);
-    this.attemptReconnect();
-  }
-
-  /**
-   * Attempt to reconnect to the socket server
-   */
-  private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error(`Maximum reconnect attempts (${this.maxReconnectAttempts}) reached. Giving up.`);
-      return;
+    
+    // Check for specific error messages
+    const errorMessage = error.message || '';
+    
+    if (errorMessage.includes('User profile not found') || errorMessage.includes('profile not found')) {
+      console.log('Profile missing error detected. This may be normal for new users.');
+      handleProfileMissingError(errorMessage);
+    } else {
+      updateSocketStatus(SocketStatus.ERROR, errorMessage);
+      // Use the manager's reconnection strategy
+      scheduleReconnect();
     }
-
-    this.reconnectAttempts++;
-    console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${this.reconnectInterval / 1000}s...`);
-
-    // Clear any existing timer
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-    }
-
-    // Set up reconnect timer
-    this.reconnectTimer = setTimeout(() => {
-      console.log('Reconnecting...');
-      this.connect();
-    }, this.reconnectInterval);
   }
 
   /**
@@ -145,8 +230,12 @@ class SocketService {
     console.log('New notification received:', notification);
     store.dispatch(addNotification(notification));
     
-    // You can also show a toast or alert for the notification
-    // This would typically be handled by the UI component that uses this service
+    // Show a toast notification for real-time alerts
+    const message = notification.message || 'You have a new notification';
+    toast.info(message, {
+      position: 'top-right',
+      autoClose: 5000
+    });
   }
 
   /**
@@ -173,6 +262,13 @@ class SocketService {
 
     console.log('Leaving room:', room);
     this.socket.emit('leave', { room });
+  }
+
+  /**
+   * Get the current connection status
+   */
+  public isConnected(): boolean {
+    return this.socket?.connected || false;
   }
 }
 

@@ -52,6 +52,7 @@ export interface Post {
   tags?: string | string[];
   mentions?: string | string[];
   isPublic?: boolean;
+  privacy?: 'public' | 'private' | 'followers';
   
   isLiked?: boolean;
   createdAt: string;
@@ -62,16 +63,28 @@ export interface Post {
 export interface Comment {
   id: string;
   content: string;
-  author: User;
-  post: string; // Post ID
-  likes: number;
+  postId: string;
+  author?: User;
+  profile?: User;
+  profileId?: string;
+  createdAt: string;
+  updatedAt?: string;
+  parentId?: string;
+  isDeleted?: boolean;
+  userId?: string;
+  // Fields for ownership check (already added above)
+  
+  // Fields for likes
+  likes?: number;
   likeCount?: number;
   isLiked?: boolean;
-  parentId?: string;
-  repliesCount?: number;
+  
+  // Fields for replies
   replies?: Comment[];
-  createdAt: string;
-  updatedAt: string;
+  repliesCount?: number;
+  
+  // Legacy field - keep for compatibility
+  post?: string; // Post ID (legacy)
 }
 
 export interface Notification {

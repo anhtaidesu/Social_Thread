@@ -1,5 +1,6 @@
 import axiosInstance from '../utils/axiosConfig';
 import { User } from '../types';
+import { toast } from 'react-toastify';
 
 // Định nghĩa kiểu dữ liệu trả về
 interface ProfileResponse {
@@ -8,13 +9,195 @@ interface ProfileResponse {
   error: string | null;
 }
 
+interface ProfileStatusResponse {
+  success: boolean;
+  exists: boolean;
+  isInitializing: boolean;
+  error: string | null;
+}
+
 // URL của Social Service API
 const SOCIAL_API_URL = process.env.REACT_APP_SOCIAL_API_URL || 'http://localhost:8081';
+
+// Cache for profile check to avoid frequent API calls
+let profileCheckCache: { 
+  timestamp: number, 
+  exists: boolean, 
+  isInitializing: boolean 
+} | null = null;
+
+const CACHE_TTL = 10000; // 10 seconds
 
 /**
  * Service để gọi các API profile
  */
 export const ProfileService = {
+  /**
+   * Kiểm tra trạng thái tồn tại/khởi tạo của profile
+   * Dùng để đánh giá nếu profile đang được tạo lần đầu
+   */
+  checkProfileStatus: async (): Promise<ProfileStatusResponse> => {
+    try {
+      // Check if we have a valid cache entry
+      const now = Date.now();
+      if (profileCheckCache && (now - profileCheckCache.timestamp < CACHE_TTL)) {
+        console.log('Using cached profile status check');
+        return {
+          success: true,
+          exists: profileCheckCache.exists,
+          isInitializing: profileCheckCache.isInitializing,
+          error: null
+        };
+      }
+      
+      console.log('Checking current profile status');
+      
+      // Try to fetch the current profile
+      const response = await axiosInstance.get(`${SOCIAL_API_URL}/api/v1/profiles/me`);
+      
+      // Profile exists normally
+      if (response.data.status === 'success' && response.data.data.profile) {
+        profileCheckCache = {
+          timestamp: now,
+          exists: true,
+          isInitializing: false
+        };
+        
+        return {
+          success: true,
+          exists: true,
+          isInitializing: false,
+          error: null
+        };
+      }
+      
+      // Something went wrong with the request itself
+      return {
+        success: false,
+        exists: false,
+        isInitializing: false,
+        error: response.data.message || 'Failed to check profile status'
+      };
+    } catch (error: any) {
+      console.log('Profile status check response:', error.response);
+      
+      // 401/403 = not authenticated
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        return {
+          success: false,
+          exists: false,
+          isInitializing: false,
+          error: 'Authentication required'
+        };
+      }
+      
+      // If we get a 404, the profile doesn't exist yet but token is valid
+      // This indicates that profile creation is in progress
+      if (error.response?.status === 404) {
+        // Check if the error message indicates profile not found
+        const isProfileNotFound = 
+          error.response?.data?.message?.includes('profile not found') ||
+          error.response?.data?.message?.includes('Profile not found');
+        
+        const isInitializing = isProfileNotFound;
+        
+        profileCheckCache = {
+          timestamp: Date.now(),
+          exists: false,
+          isInitializing
+        };
+        
+        return {
+          success: true, // This is actually a successful check - we now know status
+          exists: false,
+          isInitializing,
+          error: null
+        };
+      }
+      
+      return {
+        success: false,
+        exists: false,
+        isInitializing: false,
+        error: error.response?.data?.message || error.message || 'Error checking profile status'
+      };
+    }
+  },
+  
+  /**
+   * Đợi cho đến khi profile được tạo thành công
+   * Hữu ích khi profile đang được khởi tạo
+   */
+  waitForProfileCreation: async (timeout = 30000, interval = 2000): Promise<ProfileResponse> => {
+    const startTime = Date.now();
+    let attempts = 0;
+    
+    const waitMessage = toast.info('Waiting for your profile to be created...', {
+      position: 'top-right',
+      autoClose: false,
+      closeOnClick: false,
+      pauseOnHover: true,
+      draggable: true,
+    });
+    
+    while (Date.now() - startTime < timeout) {
+      attempts++;
+      console.log(`Profile creation check attempt ${attempts}`);
+      
+      try {
+        const statusCheck = await ProfileService.checkProfileStatus();
+        
+        if (statusCheck.success && statusCheck.exists) {
+          // Profile exists, fetch and return it
+          toast.update(waitMessage, { 
+            render: 'Profile created successfully!', 
+            type: 'success',
+            autoClose: 3000 
+          });
+          return await ProfileService.getCurrentProfile();
+        }
+        
+        if (!statusCheck.isInitializing) {
+          // Not initializing, something else is wrong
+          toast.update(waitMessage, { 
+            render: 'Profile is not being created. Please try again.', 
+            type: 'error',
+            autoClose: 5000 
+          });
+          return {
+            success: false,
+            data: null,
+            error: 'Profile is not being initialized'
+          };
+        }
+        
+        // Still initializing, update message and wait
+        toast.update(waitMessage, { 
+          render: `Creating your profile (attempt ${attempts})...`, 
+          autoClose: false 
+        });
+        
+        // Wait before the next check
+        await new Promise(resolve => setTimeout(resolve, interval));
+      } catch (error) {
+        console.error('Error while waiting for profile creation:', error);
+      }
+    }
+    
+    // Timeout reached
+    toast.update(waitMessage, { 
+      render: 'Profile creation timed out. Please refresh the page.', 
+      type: 'error',
+      autoClose: 5000 
+    });
+    
+    return {
+      success: false,
+      data: null,
+      error: 'Profile creation timed out'
+    };
+  },
+  
   /**
    * Lấy thông tin profile theo identifier (có thể là username hoặc ID)
    * Sử dụng route mặc định để tự động phát hiện

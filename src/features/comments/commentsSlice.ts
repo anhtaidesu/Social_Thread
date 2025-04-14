@@ -25,7 +25,7 @@ export const fetchComments = createAsyncThunk<
   try {
     const response = await axiosInstance.get(`/api/v1/posts/${postId}/comments?page=${page}&limit=${limit}`);
     
-    console.log('Comments response:', response.data);
+    console.log('Comments API response:', response.data);
     
     if (response.data.status === 'error') {
       return rejectWithValue(response.data.message || 'Failed to fetch comments');
@@ -35,18 +35,45 @@ export const fetchComments = createAsyncThunk<
     // We need to extract the replies array
     const replies = response.data.data?.replies || [];
     
+    // Debug: Log the first reply to examine its structure
+    if (replies.length > 0) {
+      console.log('First reply structure:', JSON.stringify(replies[0], null, 2));
+    }
+    
     // Ensure each comment has proper author information
     const validatedReplies = replies.map((reply: any) => {
-      if (!reply.author) {
+      // Log the author info to see what's coming from the API
+      console.log('Reply author data:', reply.author, 'profile data:', reply.profile);
+      
+      // Check for author info in different possible locations
+      const authorData = reply.author || reply.profile || (reply.user ? {
+        id: reply.user.id,
+        userId: reply.user.id,
+        username: reply.user.username,
+        displayName: reply.user.displayName || reply.user.username,
+        profilePicture: reply.user.profilePicture
+      } : null);
+      
+      if (!authorData) {
         // If author is missing, add a placeholder
         reply.author = {
-          id: reply.profileId || 'unknown',
+          id: reply.profileId || reply.userId || 'unknown',
           username: 'Unknown',
           displayName: 'Unknown User',
           profilePicture: null,
           createdAt: reply.createdAt || new Date().toISOString()
         };
+      } else {
+        // Make sure author has consistent structure
+        reply.author = {
+          id: authorData.id || authorData.userId || 'unknown',
+          username: authorData.username || 'Unknown',
+          displayName: authorData.displayName || authorData.username || 'Unknown User',
+          profilePicture: authorData.profilePicture || null,
+          createdAt: authorData.createdAt || reply.createdAt || new Date().toISOString()
+        };
       }
+      
       return reply;
     });
     
@@ -67,7 +94,7 @@ export const addComment = createAsyncThunk<
   
   try {
     const response = await axiosInstance.post(`/api/v1/posts/${postId}/comments`, { content });
-    console.log('Add comment response:', response.data);
+    console.log('Add comment API response:', response.data);
     
     if (response.data.status === 'error') {
       return rejectWithValue(response.data.message || 'Failed to add comment');
@@ -76,25 +103,37 @@ export const addComment = createAsyncThunk<
     // The API returns a post structure, we need to transform it to a comment structure
     const postData = response.data.data.post;
     
+    // Debug: Log the post data to examine its structure
+    console.log('Posted comment data:', JSON.stringify(postData, null, 2));
+    
+    // Extract author information from various possible locations
+    const authorData = postData.profile || postData.author || postData.user || null;
+    console.log('Author data from response:', authorData);
+
+    // Get the current user from the store as a fallback
+    const currentUser = await getCurrentUser();
+    console.log('Current user from store:', currentUser);
+    
     // Transform the post to a comment structure that our UI expects
     const comment: Comment = {
       id: postData.id,
       content: postData.content,
-      post: postId,  // This is post ID
-      likes: postData.likeCount || 0,
+      postId: postId,
+      post: postId,
+      likes: postData.likes || postData.likeCount || 0,
       likeCount: postData.likeCount || 0,
       isLiked: false,
       parentId: postData.parentId,
-      repliesCount: 0,
+      repliesCount: postData.repliesCount || postData.replies?.length || 0,
       createdAt: postData.createdAt,
       updatedAt: postData.updatedAt,
-      author: postData.profile || postData.author || {
-        id: postData.profileId || 'unknown',
-        username: 'Unknown',
-        displayName: 'Unknown User',
-        profilePicture: null,
-        createdAt: new Date().toISOString()
-      }
+      author: {
+        id: postData.author?.id || postData.profile?.id || postData.profileId || 'unknown',
+        username: postData.author?.username || postData.profile?.username || 'Unknown User',
+        displayName: postData.author?.displayName || postData.profile?.displayName || postData.author?.fullName || postData.profile?.fullName || postData.author?.username || postData.profile?.username || 'Unknown User',
+        profilePicture: postData.author?.profilePicture || postData.profile?.profilePicture || null,
+        createdAt: postData.author?.createdAt || postData.profile?.createdAt || postData.createdAt,
+      },
     };
     
     return comment;
@@ -103,6 +142,21 @@ export const addComment = createAsyncThunk<
     return rejectWithValue(error.response?.data?.message || 'Failed to add comment');
   }
 });
+
+// Helper function to get current user data from Redux store
+const getCurrentUser = async () => {
+  try {
+    // This is a simplified example - you'd need to adjust based on your actual state structure
+    const response = await axiosInstance.get('/api/v1/profiles/me');
+    if (response.data.status === 'success' && response.data.data.profile) {
+      return response.data.data.profile;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting current user:', error);
+    return null;
+  }
+};
 
 // Like a comment
 export const likeComment = createAsyncThunk<
@@ -156,12 +210,50 @@ export const replyToComment = createAsyncThunk<
       parentId
     });
     
+    console.log('Reply to comment API response:', response.data);
+    
     if (response.data.status === 'error') {
       return rejectWithValue(response.data.message || 'Failed to reply to comment');
     }
     
-    return response.data.data;
+    // The API returns a post structure, we need to transform it to a comment structure
+    const postData = response.data.data.post || response.data.data;
+    
+    // Debug: Log the post data to examine its structure
+    console.log('Reply data:', JSON.stringify(postData, null, 2));
+    
+    // Extract author information from various possible locations
+    const authorData = postData.profile || postData.author || postData.user || null;
+    console.log('Reply author data from response:', authorData);
+
+    // Get the current user from the store as a fallback
+    const currentUser = await getCurrentUser();
+    
+    // Transform the post to a comment structure that our UI expects
+    const comment: Comment = {
+      id: postData.id,
+      content: postData.content,
+      postId: postId,
+      post: postId,
+      likes: postData.likes || postData.likeCount || 0,
+      likeCount: postData.likeCount || 0,
+      isLiked: false,
+      parentId: postData.parentId || parentId,
+      repliesCount: postData.repliesCount || postData.replies?.length || 0,
+      createdAt: postData.createdAt,
+      updatedAt: postData.updatedAt,
+      author: {
+        id: postData.author?.id || postData.profile?.id || postData.profileId || 'unknown',
+        username: postData.author?.username || postData.profile?.username || 'Unknown User',
+        displayName: postData.author?.displayName || postData.profile?.displayName || postData.author?.fullName || postData.profile?.fullName || postData.author?.username || postData.profile?.username || 'Unknown User',
+        profilePicture: postData.author?.profilePicture || postData.profile?.profilePicture || null,
+        createdAt: postData.author?.createdAt || postData.profile?.createdAt || postData.createdAt,
+      },
+    };
+    
+    return comment;
   } catch (error: any) {
+    console.error('Error replying to comment:', error);
     return rejectWithValue(error.response?.data?.message || 'Failed to reply to comment');
   }
 });

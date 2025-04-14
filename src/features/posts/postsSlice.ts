@@ -151,20 +151,36 @@ export const fetchUserPosts = createAsyncThunk<
   { rejectValue: ErrorResponse }
 >('posts/fetchUserPosts', async (params, { rejectWithValue }) => {
   try {
-    const { identifier, page, limit } = params;
-    console.log(`Fetching posts for user: ${identifier}`);
+    const { identifier, page = 1, limit = 20 } = params;
+    
+    // Make sure we have a valid identifier
+    if (!identifier || identifier === 'undefined' || identifier === 'null') {
+      console.error('Invalid identifier provided to fetchUserPosts:', identifier);
+      return rejectWithValue({
+        message: 'Invalid identifier provided',
+        status: 400,
+      });
+    }
+    
+    console.log(`[Redux] Fetching posts for user: ${identifier}, page: ${page}, limit: ${limit}`);
     
     const result = await PostService.getProfilePosts(identifier, page, limit);
+    console.log('[Redux] Profile posts API result:', result);
     
     if (!result.success) {
+      console.error('[Redux] Failed to fetch user posts:', result.error);
       return rejectWithValue({
         message: result.error || 'Failed to fetch user posts',
         status: 400,
       });
     }
     
-    return result.data?.posts || [];
+    const posts = result.data?.posts || [];
+    console.log(`[Redux] Successfully retrieved ${posts.length} posts for profile: ${identifier}`);
+    
+    return posts;
   } catch (error: any) {
+    console.error('[Redux] Error in fetchUserPosts:', error);
     return rejectWithValue({
       message: error.message || 'Failed to fetch user posts',
       status: 500,
@@ -227,6 +243,44 @@ export const deletePost = createAsyncThunk<
   }
 });
 
+// Update post
+export const updatePost = createAsyncThunk<
+  Post,
+  { id: string; content?: string; isPublic?: boolean; privacy?: 'public' | 'private' | 'followers' },
+  { rejectValue: ErrorResponse }
+>('posts/updatePost', async (updateData, { rejectWithValue }) => {
+  try {
+    console.log(`Updating post: ${updateData.id}`, updateData);
+    
+    // Convert privacy setting to isPublic for backwards compatibility
+    let isPublic = updateData.isPublic;
+    if (updateData.privacy) {
+      isPublic = updateData.privacy === 'public';
+    }
+    
+    const result = await PostService.updatePost({
+      id: updateData.id,
+      content: updateData.content,
+      isPublic: isPublic,
+      privacy: updateData.privacy
+    });
+    
+    if (!result.success) {
+      return rejectWithValue({
+        message: result.error || 'Failed to update post',
+        status: 400,
+      });
+    }
+    
+    return result.data;
+  } catch (error: any) {
+    return rejectWithValue({
+      message: error.message || 'Failed to update post',
+      status: 500,
+    });
+  }
+});
+
 // Fetch feed posts
 export const fetchFeed = createAsyncThunk<
   Post[],
@@ -264,6 +318,8 @@ const postsSlice = createSlice({
       state.feed = [];
       state.userPosts = [];
       state.singlePost = null;
+      state.error = null;
+      state.isLoading = false;
     },
   },
   extraReducers: (builder) => {
@@ -365,6 +421,31 @@ const postsSlice = createSlice({
       .addCase(deletePost.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload?.message || 'Failed to delete post';
+      });
+
+    // Update post cases
+    builder
+      .addCase(updatePost.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(updatePost.fulfilled, (state, action) => {
+        state.isLoading = false;
+        
+        // Update the post in the userPosts array
+        const index = state.userPosts.findIndex(post => post.id === action.payload.id);
+        if (index !== -1) {
+          state.userPosts[index] = action.payload;
+        }
+        
+        // Update the single post if it's the one being viewed
+        if (state.singlePost && state.singlePost.id === action.payload.id) {
+          state.singlePost = action.payload;
+        }
+      })
+      .addCase(updatePost.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload?.message || 'Failed to update post';
       });
 
     // Fetch feed cases

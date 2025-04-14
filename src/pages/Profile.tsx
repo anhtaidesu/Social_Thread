@@ -25,14 +25,19 @@ import {
   LinearProgress,
   InputAdornment,
   Pagination,
-  Alert
+  Alert,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material';
 import { 
   Settings as SettingsIcon,
   LinkOutlined as LinkIcon,
   Close as CloseIcon,
   Edit as EditIcon,
-  PhotoCamera as PhotoCameraIcon
+  PhotoCamera as PhotoCameraIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 import { 
   fetchUserProfile, 
@@ -44,7 +49,7 @@ import {
   fetchUserFollowers,
   fetchUserFollowing
 } from '../features/userProfile/userProfileSlice';
-import { fetchUserPosts, createRepost } from '../features/posts/postsSlice';
+import { fetchUserPosts, createRepost, clearPosts, deletePost } from '../features/posts/postsSlice';
 import type { AppDispatch, RootState } from '../app/store';
 import PostItem from '../components/PostItem';
 import UserList from '../components/UserList';
@@ -131,6 +136,9 @@ const DebugInfo: React.FC<DebugInfoProps> = ({
   const queryParamId = urlParams.get('id');
   const urlId = userId || queryParamId;
   
+  // Get Redux state for debugging
+  const postsState = useSelector((state: RootState) => state.posts);
+  
   // Điều kiện return sau khi đã gọi tất cả các hook
   if (!debugMode) return null;
   
@@ -208,6 +216,29 @@ const DebugInfo: React.FC<DebugInfoProps> = ({
         <Typography color="error">Profile not loaded</Typography>
       )}
       
+      <Divider sx={{ my: 1 }} />
+      
+      <Typography variant="subtitle2">Posts State:</Typography>
+      <Box component="pre" sx={{ 
+        maxHeight: 200, 
+        overflow: 'auto', 
+        fontSize: '0.75rem',
+        p: 1,
+        bgcolor: '#e0e0e0',
+        borderRadius: 1
+      }}>
+        {JSON.stringify({
+          postsLoading: postsState.isLoading,
+          postsError: postsState.error,
+          userPostsCount: postsState.userPosts.length,
+          userPostsData: postsState.userPosts.map(p => ({
+            id: p.id,
+            content: p.content?.substring(0, 30) + (p.content && p.content.length > 30 ? '...' : ''),
+            createdAt: p.createdAt
+          }))
+        }, null, 2)}
+      </Box>
+      
       <Button 
         variant="outlined" 
         size="small" 
@@ -284,6 +315,15 @@ const Profile: React.FC = () => {
   const [searchUsername, setSearchUsername] = useState('');
   const [debugMode, setDebugMode] = useState<boolean>(false);
   
+  // Add new state variables for managing post deletion and reposts
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [postToDelete, setPostToDelete] = useState<string | null>(null);
+  const [repostsFilter, setRepostsFilter] = useState<'all' | 'created' | 'reposted'>('all');
+  
+  // Add these state variables back near the other state variables (around line 314)
+  const [postMenuAnchor, setPostMenuAnchor] = useState<null | HTMLElement>(null);
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+  
   // Enhanced isOwnProfile check with detailed logging
   const isOwnProfile = React.useMemo(() => {
     if (!currentUser || !profile) return false;
@@ -328,62 +368,123 @@ const Profile: React.FC = () => {
   
   useEffect(() => {
     if (identifier) {
-      console.log(`Fetching profile for identifier: ${identifier}, userId: ${userId}, username: ${username}, urlId: ${urlId}`);
+      console.log(`[Profile] Fetching profile for identifier: ${identifier}, userId: ${userId}, username: ${username}, urlId: ${urlId}`);
       
-      // Reset error state before new fetch
-      // dispatch(clearProfileError());
+      // Reset loading state and clear existing posts
+      dispatch(clearPosts());
+      
+      // Determine the best identifier to use for post fetching
+      let postIdentifier = '';
       
       // Trường hợp 1: Tham số username được cung cấp trong URL (/@username)
       if (username) {
         console.log('[Profile] Fetching by username route:', username);
         const cleanUsername = username.replace(/^@/, ''); // Loại bỏ @ nếu có
         console.log('[Profile] Clean username:', cleanUsername);
+        postIdentifier = cleanUsername;
         
         // Thử fetchUserProfileByUsername trước
         dispatch(fetchUserProfileByUsername(cleanUsername))
           .unwrap()
+          .then(profile => {
+            console.log('[Profile] Successfully fetched profile by username:', profile);
+            // Use userId from profile as identifier if available for better post fetching
+            if (profile.id) {
+              console.log('[Profile] Using profile.id for posts:', profile.id);
+              postIdentifier = profile.id;
+              dispatch(fetchUserPosts({ identifier: profile.id, page: 1, limit: 20 }));
+            } else if (profile.userId) {
+              console.log('[Profile] Using profile.userId as fallback for posts:', profile.userId);
+              postIdentifier = profile.userId;
+              dispatch(fetchUserPosts({ identifier: profile.userId, page: 1, limit: 20 }));
+            } else {
+              dispatch(fetchUserPosts({ identifier: cleanUsername, page: 1, limit: 20 }));
+            }
+          })
           .catch((error) => {
             console.log('[Profile] Username lookup failed, trying general lookup as fallback:', error);
             // Nếu thất bại, thử fetchUserProfile thông thường
             dispatch(fetchUserProfile(cleanUsername));
+            dispatch(fetchUserPosts({ identifier: cleanUsername, page: 1, limit: 20 }));
           });
-          
-        dispatch(fetchUserPosts({ identifier: cleanUsername, page: 1, limit: 20 }));
       } 
       // Trường hợp 2: Tham số userId được cung cấp trong URL (/profile/:userId)
       else if (userId) {
         console.log('[Profile] Fetching by userId route:', userId);
+        postIdentifier = userId;
         
         // Thử fetchUserProfileByUserId trước
         dispatch(fetchUserProfileByUserId(userId))
           .unwrap()
+          .then(profile => {
+            console.log('[Profile] Successfully fetched profile by userId:', profile);
+            // Use id directly from profile for posts
+            if (profile.id) {
+              console.log('[Profile] Using profile.id for posts:', profile.id);
+              dispatch(fetchUserPosts({ identifier: profile.id, page: 1, limit: 20 }));
+            } else {
+              dispatch(fetchUserPosts({ identifier: userId, page: 1, limit: 20 }));
+            }
+          })
           .catch((error) => {
             console.log('[Profile] UserId lookup failed, trying general lookup as fallback:', error);
             // Nếu thất bại, thử fetchUserProfile thông thường
             dispatch(fetchUserProfile(userId));
+            dispatch(fetchUserPosts({ identifier: userId, page: 1, limit: 20 }));
           });
-          
-        dispatch(fetchUserPosts({ identifier: userId, page: 1, limit: 20 }));
       }
       // Trường hợp 3: Sử dụng query param id nếu có
       else if (queryParamId) {
         console.log('[Profile] Fetching by query param id:', queryParamId);
+        postIdentifier = queryParamId;
         
         dispatch(fetchUserProfileByUserId(queryParamId))
           .unwrap()
+          .then(profile => {
+            console.log('[Profile] Successfully fetched profile by query param id:', profile);
+            // Use profile.id for fetching posts
+            if (profile.id) {
+              console.log('[Profile] Using profile.id for posts:', profile.id);
+              dispatch(fetchUserPosts({ identifier: profile.id, page: 1, limit: 20 }));
+            } else {
+              dispatch(fetchUserPosts({ identifier: queryParamId, page: 1, limit: 20 }));
+            }
+          })
           .catch((error) => {
             console.log('[Profile] Query param id lookup failed, trying general lookup as fallback:', error);
             dispatch(fetchUserProfile(queryParamId));
+            dispatch(fetchUserPosts({ identifier: queryParamId, page: 1, limit: 20 }));
           });
-          
-        dispatch(fetchUserPosts({ identifier: queryParamId, page: 1, limit: 20 }));
       }
       // Trường hợp 4: Fallback vào phương thức thông thường nếu các tham số trên không được cung cấp
       else {
         console.log('[Profile] Fallback to general lookup with identifier:', identifier);
-        dispatch(fetchUserProfile(identifier));
-        dispatch(fetchUserPosts({ identifier, page: 1, limit: 20 }));
+        postIdentifier = identifier;
+        
+        dispatch(fetchUserProfile(identifier))
+          .unwrap()
+          .then(profile => {
+            console.log('[Profile] Successfully fetched profile by general identifier:', profile);
+            // Use userId from profile as identifier if available for better post fetching
+            if (profile.id) {
+              console.log('[Profile] Using profile.id for posts:', profile.id);
+              postIdentifier = profile.id;
+              dispatch(fetchUserPosts({ identifier: profile.id, page: 1, limit: 20 }));
+            } else if (profile.userId) {
+              console.log('[Profile] Using profile.userId as fallback for posts:', profile.userId);
+              postIdentifier = profile.userId;
+              dispatch(fetchUserPosts({ identifier: profile.userId, page: 1, limit: 20 }));
+            } else {
+              dispatch(fetchUserPosts({ identifier, page: 1, limit: 20 }));
+            }
+          })
+          .catch((error) => {
+            console.log('[Profile] General lookup failed:', error);
+            dispatch(fetchUserPosts({ identifier, page: 1, limit: 20 }));
+          });
       }
+      
+      console.log('[Profile] Final postIdentifier being used:', postIdentifier);
     }
   }, [dispatch, identifier, userId, username, queryParamId, urlId]);
   
@@ -760,6 +861,41 @@ const Profile: React.FC = () => {
     setDebugMode(prev => !prev);
   };
   
+  // Add handlers for post deletion
+  const handleDeletePost = (postId: string) => {
+    setPostToDelete(postId);
+    setShowDeleteConfirm(true);
+  };
+  
+  const confirmDeletePost = () => {
+    if (postToDelete) {
+      dispatch(deletePost(postToDelete))
+        .unwrap()
+        .then(() => {
+          showSuccessMessage('Post deleted successfully');
+        })
+        .catch((error) => {
+          showErrorMessage(`Failed to delete post: ${error}`);
+        });
+    }
+    setShowDeleteConfirm(false);
+    setPostToDelete(null);
+  };
+  
+  const cancelDeletePost = () => {
+    setShowDeleteConfirm(false);
+    setPostToDelete(null);
+  };
+  
+  // Get user reposts
+  const userReposts = userPosts.filter(post => post.isRepost || post.originalPostId);
+  
+  // Add this handler back
+  const handleClosePostMenu = () => {
+    setPostMenuAnchor(null);
+    setSelectedPostId(null);
+  };
+  
   if (profileLoading && !profile) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
@@ -976,6 +1112,7 @@ const Profile: React.FC = () => {
         <Tab label="Posts" {...a11yProps(0)} />
         <Tab label="Replies" {...a11yProps(1)} />
         <Tab label="Media" {...a11yProps(2)} />
+        <Tab label="Reposts" {...a11yProps(3)} />
       </Tabs>
       
       <TabPanel value={tabValue} index={0}>
@@ -988,17 +1125,27 @@ const Profile: React.FC = () => {
             <Typography color="textSecondary">
               No posts yet
             </Typography>
+            <Button 
+              variant="outlined" 
+              size="small" 
+              color="primary" 
+              sx={{ mt: 2 }}
+              onClick={() => setDebugMode(!debugMode)}
+            >
+              {debugMode ? 'Hide Debug Info' : 'Show Debug Info'}
+            </Button>
           </Box>
         ) : (
           <Box>
             {userPosts.map(post => (
-              <PostItem 
-                key={post.id} 
-                post={post} 
-                onLike={handleLike}
-                onRepost={handleRepost}
-                onComment={handleComment}
-              />
+              <Box key={post.id} sx={{ position: 'relative' }}>
+                <PostItem 
+                  post={post} 
+                  onLike={handleLike}
+                  onRepost={handleRepost}
+                  onComment={handleComment}
+                />
+              </Box>
             ))}
           </Box>
         )}
@@ -1018,6 +1165,66 @@ const Profile: React.FC = () => {
             No media posts yet
           </Typography>
         </Box>
+      </TabPanel>
+      
+      <TabPanel value={tabValue} index={3}>
+        <Box sx={{ mb: 2 }}>
+          <Button 
+            variant={repostsFilter === 'all' ? 'contained' : 'outlined'} 
+            size="small"
+            onClick={() => setRepostsFilter('all')}
+            sx={{ mr: 1 }}
+          >
+            All
+          </Button>
+          <Button 
+            variant={repostsFilter === 'created' ? 'contained' : 'outlined'} 
+            size="small"
+            onClick={() => setRepostsFilter('created')}
+            sx={{ mr: 1 }}
+          >
+            Created
+          </Button>
+          <Button 
+            variant={repostsFilter === 'reposted' ? 'contained' : 'outlined'} 
+            size="small"
+            onClick={() => setRepostsFilter('reposted')}
+          >
+            Reposted
+          </Button>
+        </Box>
+        
+        {postsLoading && userReposts.length === 0 ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+            <CircularProgress />
+          </Box>
+        ) : userReposts.length === 0 ? (
+          <Box sx={{ my: 4, textAlign: 'center' }}>
+            <Typography color="textSecondary">
+              No reposts yet
+            </Typography>
+          </Box>
+        ) : (
+          <Box>
+            {userReposts
+              .filter(post => {
+                if (repostsFilter === 'all') return true;
+                if (repostsFilter === 'created') return !post.isRepost;
+                if (repostsFilter === 'reposted') return post.isRepost;
+                return true;
+              })
+              .map(post => (
+                <Box key={post.id} sx={{ position: 'relative' }}>
+                  <PostItem 
+                    post={post} 
+                    onLike={handleLike}
+                    onRepost={handleRepost}
+                    onComment={handleComment}
+                  />
+                </Box>
+              ))}
+          </Box>
+        )}
       </TabPanel>
       
       {/* Followers Dialog */}
@@ -1080,6 +1287,35 @@ const Profile: React.FC = () => {
             }}
           />
         </DialogContent>
+      </Dialog>
+      
+      {/* Delete Post Confirmation Dialog */}
+      <Dialog
+        open={showDeleteConfirm}
+        onClose={cancelDeletePost}
+        aria-labelledby="delete-dialog-title"
+        aria-describedby="delete-dialog-description"
+      >
+        <DialogTitle id="delete-dialog-title">
+          Delete Post
+        </DialogTitle>
+        <DialogContent>
+          <Typography id="delete-dialog-description">
+            Are you sure you want to delete this post? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', p: 2 }}>
+          <Button onClick={cancelDeletePost} sx={{ mr: 1 }}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={confirmDeletePost} 
+            variant="contained" 
+            color="error"
+          >
+            Delete
+          </Button>
+        </Box>
       </Dialog>
       
       {/* Edit Profile Modal */}
@@ -1207,6 +1443,26 @@ const Profile: React.FC = () => {
         debugMode={debugMode}
         toggleDebugMode={toggleDebugMode}
       />
+      
+      {/* Post Options Menu - Empty but needed for references */}
+      <Menu
+        anchorEl={postMenuAnchor}
+        open={Boolean(postMenuAnchor)}
+        onClose={handleClosePostMenu}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <MenuItem onClick={() => {
+          if (selectedPostId) {
+            handleDeletePost(selectedPostId);
+            handleClosePostMenu();
+          }
+        }}>
+          <ListItemIcon>
+            <DeleteIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Delete Post</ListItemText>
+        </MenuItem>
+      </Menu>
     </Box>
   );
 };
